@@ -1,0 +1,2661 @@
+---
+title: "An Ensemble Model to Predict the Obesity Levels of Latin American countries: Development and Evaluation"
+subtitle: "DA5030"
+author: "Pretel Pretel, Natalia"
+date: "Summer Term 2025"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float: true 
+bibliography: references.bib
+---
+
+# Install and load packages
+
+```{r Install_packages, echo = TRUE, warning=FALSE}
+
+required_packages <-c(
+  "caret",
+  "caretEnsemble",
+  "dplyr",
+  "nnet",
+  "glmnet",
+  "VGAM",
+  "rpart",
+  "rpart.plot",
+  "C50",
+  "knitr"
+)
+
+
+# Install any packages not already installed
+installed_packages <- rownames(installed.packages())
+for (package in required_packages) {
+  if (!package %in% installed_packages) install.packages(package, dependencies = TRUE)
+}
+
+# Load all required packages
+invisible(lapply(required_packages, library, character.only = TRUE))
+
+
+```
+
+
+
+# Business Understanding
+
+## Asses Situation
+
+Obesity and overweight are leading public health concerns that affect globally as they are major risk factors for a wide variety of chronic diseases such as diabetes and hypertension, including cardiovascular diseases like heart disease and stroke, which are the main leading causes of death worldwide.
+
+The development of predictive models that are able to estimate the obesity levels based on lifestyle and physical condition characteristics can help clinicians and public health agents to make an optimal decision related to the prevention, the detection and the treatment of obesity.
+
+Specifically this project is focused on the individuals of diverse countries in Latin America that include Mexico, Peru and Colombia, where the raising rates of obesity present a significant challenge in healthcare.
+
+## Business Objective
+
+The objective of this project is to develop, analyze and compare different predictive models that will classify individuals into one of the seven obesity categories, based on their eating habits and physical condition. These models can be used in public health or to offer a personalized health treatment.
+
+## Data Source
+
+The dataset that has been used in this project is publicly available on the [UCI Machine Learning Repository] (@palechor2019obesity). It contains 2,111 observations and 17 different variables that include continuous, binary, categorical, and integer features.
+
+## Project Goals
+
+This project aims to create three supervised classification models that include: Logistic Regression, Decision Tree and Neural Network, apply bagging to build a homogeneous model for each algorithm and finally combine them into a heterogeneous ensemble model.
+
+The performance of each model will be evaluated using the accuracy, precision, recall and F1-score so that we can compare the results with previously reported results. We will also analyze confusion matrices to understand the classification patterns, especially as this is a multi-class classification task.
+
+## Comparison to Prior Work
+
+We are going to use the work by Kabongo and Luzolo (@kabongo2020five) to compare the results of our project. They have evaluated Five machine learning classification models including Random Forest, Support Vector Machine (SVM), Logistic regression, K-nearest Neighbor, and Ridge Classifier and reported that the SVM offered the highest performance accuracy (97%). While their work is focused on the accuracy, in this project we will increase the complexity of the analysis by including **ensemble learning techniques**, as we aim to determine if by combining multiple classifier we can obtain more robust results.
+
+# Data Understanding
+
+## Load CSV files
+
+The dataset was downloaded from the [UCI Machine Learning Repository] (@palechor2019obesity). As the data didn´t have a direct URL, I download it and upload it to the awardspace.net hosting service so that it can be directly downloaded using the specific link that I have created.
+
+```{r load_csv_file,echo=TRUE,warning=FALSE}
+
+# Direct download link of file from a hosting service (Google Drive)
+project_location <- "http://pretelnda5030.scienceontheweb.net/ObesityDataSet_raw_and_data_sinthetic.csv"
+
+# Store the dataset in a variable
+
+df <- read.csv(file = project_location,
+                     header = T,
+                     stringsAsFactors = T)
+
+```
+
+## Exploratory Data Analysis
+
+In this section we will perform a brief exploratory data analysis(EDA) to understand the features:
+
+1)  Use head(), summary(), and str() to examine the dataset structure.
+2)  Check for missing values and handle them.
+3)  Check for outliers and handle them.
+4)  Visualize the features and class labels.
+5)  Check for multicollinearity and handle them.
+
+## Feature Engineering
+
+After reviewing the importance of the height and weight to classify different weight types I believe that it could be interesting to incorporate a new feature in the dataset, that could improve the predictive power of the model.
+
+This feature is the Body Mass Index (BMI), which, as mentioned in  (@clevelandclinic_bmi) which is derived from the `Weight` and `Height` columns, as is a medical screening tool that measures the ratio of your height to your weight to estimate the amount of body fat that the patient has. Moreover, is it an essential tool because it is used to classify different weight types depending on the BMI range (kg/m\^2), where we can find:
+
+-   Underweight: Less than 18.5
+-   Optimum range: 18.5 to 24.9
+-   Overweight: 25 to 29.9
+-   Class I obesity: 30 to 34.9
+-   Class II obesity: 35 to 39.9
+-   Class III obesity: More than 40
+
+and is created using the standard formula:
+
+$$
+BMI = \frac{\text{weight (kg)}}{\text{height (m)}^2}
+$$
+
+```{r feature_engineering, echo = TRUE, warning=FALSE}
+
+# 
+
+# Include the new column in the Dataset
+df$BMI <- df$Weight / (df$Height ^ 2)
+
+# Check that the column has been correctly created
+head(df)
+```
+
+### Analysis of the dataset structure
+
+The objective is to build a heterogeneous ensemble model combining logistic regression, decision trees and Neural Network to predict the different obesity levels based on lifestyle and physical condition of the patients. The following features are present:`Gender`, `Age`, `Height`, `Weight`, `family_history_with_overweight`, `FAVC`, `FCVC`, `NCP`, `CAEC`, `SMOKE`, `CH2O`, `SCC`, `FAF`, `TUE`, `CALC`, `MTRANS`, `NObeyesdad`, `BMI`.
+
+```{r EDA_analysis,echo=TRUE,warning=FALSE}
+
+# Explore dataset structure
+head(df)
+summary(df)
+str(df)
+```
+
+Our dataset contains `r nrow(df)` observations and `r ncol(df)` features, which includes **numeric and categorical variables** From the structure we can observe numeric and categorical columns, that range from demographic and lifestyle data to different attributes together with our **target variable which is `NObeyesdad`**.
+
+We can observe that some variables that the variables `FAF` and `TUE` have **a minimum value of 0** which demonstrates that in some situation these variables have no influence or activity on our target variable.
+
+It is also important to notice that the variables `family_history_with_overweight`,`FAVC`, `SMOKE` and `SCC` are binary categorical features that are stored as factor, but that we can convert them in to logical factors to improve the clarity and performance in some models such as logistic regression and neural networks.
+
+### Check for missing values
+
+Missing values in the dataset need to be identified and handled as they influence the model's predictions. Missing values can be handled:
+
+1)  Removing rows that contain missing values.
+
+2)  Imputation of missing values using mean or median.
+
+```{r check_missing_val,echo=TRUE,warning=FALSE}
+
+# Check for missing values 
+num_rows <- nrow(df)
+num_cols <- ncol(df)
+
+found <- FALSE
+total_na <- 0
+
+for (c in 1:num_cols){
+  missing_values <- which(is.na(df[,c]) | df[,c] == "")
+  num_missing_values <- length(missing_values)
+  
+  # Add to the total count
+  total_na <- total_na + num_missing_values
+  
+  if (num_missing_values > 0) {
+    print(paste0("Column '", names(df)[c], "' has ", num_missing_values, " missing values"))
+    found <- T
+  }
+}
+if (!found) {
+  print("no missing values detected")
+}
+
+
+```
+
+In order to check for the presence of missing values (NA) in the dataset we have used the `is.na()` function inside of a loop to scan the presence of NA on each column individually so that we could determine the presece of the missing value and the row where it was. After runing the analysis we have found that:
+
+-   The total number of missing values in the data set is: `r total_na`.
+
+Despite the fact that this dataset doesn´t contain any missing values, I want to demonstrate the correct procedure for handling them. To do it we are going to **intentionally introduce missing values** , specifically we are going to remove 5% of the values in three numerical columns: `Age`, `Weigth` and `CH20` and then demonstrate how to **impute those missing values using the median**, as these variables are skewed.
+
+```{r simulate_NA, echo=TRUE, warning=FALSE}
+
+# Set seed for reproducibililty 
+set.seed(123)
+
+# Create a copy of the dataset to simulate the missing values handling
+df_NA_handling <- df
+
+# Determine the columns where NA values are introduced
+NA_columns <- c("Age", "Weight", "CH2O")
+
+# Delete the 5% of the data of each column using a loop
+
+for (col in NA_columns) {
+  
+  # Calculate the 5% of the data of each column
+  NA_data <- round(0.05 * nrow(df_NA_handling ))
+  
+  # Randomly select rows to be set to NA
+  NA_rows <- sample(1:nrow(df_NA_handling ), NA_data)
+  
+  # Set the select rows to NA
+  df_NA_handling [NA_rows, col] <- NA
+} 
+
+# Check that the missing values have been correctly created
+summary(df_NA_handling)
+
+```
+
+As we can observe in the summary, the missing values have been correctly created in the `Age`, `Weigth` and `CH2O`columns. Now, we are going to use **median imputation**, as the `Age` and `Weigth` variables presents right skewness and the `CH2O` variable, despite being discrete, can also benefit from using median imputation.
+
+```{r simulate_NA_imputation, echo=TRUE, warning=FALSE}
+
+# Determine the columns where NA values have been introduced
+NA_columns <- c("Age", "Weight", "CH2O")
+
+# Impute the NA values with the median of each column using a loop
+
+for (col in NA_columns) {
+  
+  # Calculate the median for the column, excluding the NA values
+  col_median <- median(df_NA_handling[[col]], na.rm = TRUE)
+  
+  # Determine the rows of the NA values on each column
+  NA_rows <- which(is.na(df_NA_handling[[col]]))
+  
+  # Replace the NA values with the median
+  df_NA_handling[NA_rows, col] <- col_median
+}
+
+# Check that the missing values are correctly imputed
+summary(df_NA_handling)
+```
+
+Here we have correctly demonstrate in a different dataframe how we should evaluate and handle the missing values **without afecting the integrity of the original dataset**, this approach ensured that the structure and the variability of the data is preserved and we were able to demonstrate the data is correctly handled.
+
+### Outlier Identification
+
+Outliers are values in the dataset that fall far outside of the expected range of the values. So, they are extreme values, which can influence significantly our analysis, more specifically by affecting measures such as the mean and standard deviation.
+
+For this reason, it's important to identify the presence of outliers in our data, so that we can decide to remove them or impute them with more representative values.
+
+In this analysis, we will use **the z-score method** to detect the outliers. The z-score measures how many standard deviations is a data point away from the mean of the dataset. In order to use this method we have to calculate the mean and standard deviation for each numeric column.
+
+```{r detect_outliers,echo=TRUE,warning=FALSE}
+
+# Numeric col
+numeric_col_names <- names(df)[sapply(df,is.numeric)]
+
+list_of_outliers=list()
+total_outliers <- 0
+
+for (col in numeric_col_names){
+  
+  # Mean and sd for numeric col
+  mean_numeric_col <-mean(df[[col]])
+  std_numeric_col <- sd(df[[col]])
+
+  # Calculate z score 
+  z_score_numeric_col <- abs((df[[col]]-mean_numeric_col)/std_numeric_col)
+  
+  # Number of outliers> z-score =3
+  no_outliers <- which(z_score_numeric_col>3)
+  
+  list_of_outliers[[col]] <- no_outliers 
+  
+   # Add to total counter
+  total_outliers <- total_outliers + length(no_outliers)
+  
+  s <- "no"
+  
+  if (length(no_outliers) > 0)
+    s <- length(no_outliers)
+  
+  print(paste0("Column '", col, "' has ", 
+                 s, " outliers"))
+}
+
+# Print total number of outliers
+cat("Total number of outliers found across all numeric columns: ", total_outliers, "\n")
+
+```
+
+As we can observe, there are `r total_outliers` outliers in the data sets,across our 2111 observations, representing approximately 1.18% of the data. Our two choices are to remove or to impute them:
+
+-   Removing them would reduce the dataset substantially and weaken the regression analysis by decreasing sample size and statistical power.
+
+-   The imputation process is referring to the process where outliers are replaced with more typical values, instead of deleting them.
+
+In this case, as the number of outliers in the data represents approximately 1.18% of the data we are going to impute them using the median, as it is more robust than the mean if the numeric variables are skewed or contains outliers.
+
+```{r impute_outliers_median,echo=TRUE,warning=FALSE}
+
+store_outliers <- c()
+
+# For loop to remove outliers present
+for (col in names(list_of_outliers)){
+  
+  # Outliers index for column
+  outlier_index <- list_of_outliers[[col]]
+  
+  #checkif outliers exist
+  if(length(outlier_index)>0){
+    
+    #calc median of corresponding col from training dataset
+    median_col <- median(df[[col]],na.rm=T)
+    
+    # training outliers replaced
+    df[outlier_index,col] <- median_col
+    
+  }
+  
+}
+# Check if outliers have been correctly imputed
+summary(df)
+
+```
+
+### Detect normality
+
+In this part of the analysis we are going to analyze the normality of our numeric features using histograms and qq plots. Despite the fact that in logistic regression, is not neccesary to have normally distributed predictors, by analyzing the distribution of our variables we can detect if there are potential problem usch as heacy skewness or outliers that can affect the performance of our model.
+
+```{r detect_normality,echo=TRUE,warning=FALSE}
+
+# Author = Natalia Pretel
+
+# Get numeric col
+numeric_col <- names(df[sapply(df,is.numeric)])
+
+# Plot dimensions
+options(repr.plot.width=10,repr.plot.height=4)
+
+# Construct histogram and qq plot
+for (c in numeric_col){
+  par(mfrow=c(1,2))
+  hist(df[[c]],main=paste("Histogram of",c),xlab=c)
+  qqnorm(df[[c]],main=paste("QQ plot of",c))
+  qqline(df[[c]],)
+  par(mfrow=c(1,1))
+}
+
+```
+
+From the above histograms and QQ plots we can observe that:
+
+-   The `(Age)` column is biased to the left, we can observe that the majority of ages are in a range from 15 to 25, and there is a long tail that goes to the right side. In the Q-Q plot we can observe that there is a deviation from the diagonal line in a "S" pattern, demonstrating that the data is not normally distributed.
+
+-   The `(Height)` columns is centered, as the majority of data fall in that range in the middle of the values, showing a bell-shaped distribution which demonstrates that is a normal distribution. In the Q-Q plot we can observe that the points are very close to the diagonal line and that there are no deviations in the data.
+
+-   The `(Weight)` columns is biased towards the right, as the majority of the observations are between 40 and 90, and it has a tail towards the left. The Q-Q plot is deviating from the diagonal line in both ends, specially in the upper tail, which indicates the presence of skewness.
+
+-   The `(FCVC)` column, that represents the frequency of vegetable consumption, is biased as it is concentrated in the middle value (2) and in the right extreme (3), demonstrating that this is a scale input. This is clearly observable in the Q-Q plot as there are clear steps, demonstrating that the data is not normally distributed and that it is discrete data.
+
+-   The `(NCP)` column, that represents the number of main meals, is biased as it is concentrated in the middle value (3) demonstrating that this is also a scale input, which is imbalanced. This is clearly observable in the Q-Q plot as there are clear steps, demonstrating that the data is not normally distributed and that it is discrete data.
+
+-   The `(CH20)` column , that represents the daily water consumption, is biased as it is concentrated in different values (1,2 and 3) demonstrating that this is also a scale input, that is not symmetric. This is observable in the Q-Q plot as there is a clear step around 2, demonstrating that the data is not normally distributed and that it is discrete data.
+
+-   The `(FAF)` column, that represents the physical activity frequency, is skewed toward the right as it has a strong peak at the value 0, and it has smaller but additional peaks at values 1, 2 and 3. In the Q-Q plot we can observe the different steps corresponding to the discrete data and the flat line at the begining confirming the non-normality distribution.
+
+-   The `(TUE)`column, that represents the time of using technology, has a similar distribution as the `(FAF)` column, is skewed toward the right as it has a strong peak at the value 0. In the Q-Q plot we can observe the different steps corresponding to the discrete data and the flat line at the begining confirming the non-normality distribution.
+
+-   The `(BMI)` column, that represents the Body Mass Index, has a small bias toward the right, as the values are concentrated between 20 and 40. We can also observe that on the Q-Q plot, where the tail has a slight deviation, which confirms the right-skewness.
+
+### Log Transformation
+
+To the data that is right skewed and that is not discrete, which includes the variable `(Weight)` which has more skewness and we are going to apply **log transformation** as it is very effective at reducing right skewness in the data by compressing large values and stretching smaller values.
+
+```{r log_transformation, echo = TRUE, warning=FALSE}
+
+# Determine the columns that have to be transformed
+
+col_to_transform <- c("Weight")
+
+# Apply log transformation to the numeric columns using a loop
+
+for (column in col_to_transform ){
+  df[[column]] <- log(df[[column]] + 1)
+}
+
+# Plot the histograms after the log transformation
+
+par (mfrow = c(2, 3))
+
+for ( column in col_to_transform ) {
+  hist(df[[column]],
+       main = paste( "Log Transformed histogram of ", column),
+       xlab = column,
+       col = "lightblue"
+       )
+}
+
+```
+
+From our results, **the log transformation has effectively reduce the right skewness in `(Weight)` , as it has become more symmetric**. This improved symmetry will help us to fulfill the normality assumption for the residuals, leading to more stable results in the different models.
+
+### Detect Multicolinearity
+
+Multicollinearity refers to a situation in multiple linear regression where two or more independent variables exhibit a high degree of correlation. When multicollinearity is present, the regression model encounters difficulty in estimating the individual contribution of each predictor to the dependent variable because the predictors convey redundant or overlapping information; in other words, features are “double counted”.
+
+It is important to take into consideration that, the presence of multicollinearity does not affect the predictive capability of the regression model but, it severely undermines the interpretability of the coefficients. This instability complicates decision-making, particularly in applications such as finance and healthcare, where precise variable impact assessments are crucial, and this is why we have to identify it and resolve it.
+
+In this dataset, for a threshold of 0.8 we will check for multicollinearity.
+
+```{r check_multicoliinearity,echo=TRUE,warning=FALSE}
+
+# Get numeric cols
+numeric_col_cor <- sapply(df,is.numeric)
+
+# Construct correlation mat
+cor_mat <- cor(df[,numeric_col_cor])
+
+# Determine the threshold 
+threshold <- 0.8
+
+# Find the pairs above the threshold
+highly_correlated_pairs <- which(abs(cor_mat) > threshold & abs(cor_mat) < 1, arr.ind = TRUE )
+
+# Only maintain one of the pairs
+highly_correlated_pair <- highly_correlated_pairs[highly_correlated_pairs[, 1] < highly_correlated_pairs[, 2], ]
+
+# Print the results
+
+if (is.matrix(highly_correlated_pair) && nrow(highly_correlated_pair) > 0) {
+  
+  # If there are correlations above threshold
+  
+  cat("The variables with correlation above", threshold, ":\n")
+  for (pair in 1:nrow(highly_correlated_pair)) {
+    cat(rownames(cor_mat)[highly_correlated_pair[pair, 1]], "and", 
+        colnames(cor_mat)[highly_correlated_pair[pair, 2]], 
+        ":", cor_mat[highly_correlated_pair[pair, 1], highly_correlated_pair[pair, 2]], "\n")
+  }
+} else {
+  
+  # If there are no correlations above threshold
+  
+  cat("No pair of numeric predictors have a correlation above", threshold, "\n")
+}
+
+# P
+
+```
+
+We can observe that there is no multicollinearity in our dataset, as **no pair of numeric predictors have a correlation above 0.8**. This means that we can include all the numeric variables as predictors in our models, knowing that they won´t have redundancy, as all of them will contribute to improve the predictive performance of our model.
+
+### Data Correlation
+
+In this part of the analysis we are going to compare and analyze the relationship between the weight and the height, that determines the **Body Mass Index (BMI)**, which is essential in the classification of the obesity levels. We are going to color these results by the obesity level class, so that we can determine if there are specific clusters.
+
+```{r DataCorrelation, echo = TRUE}
+
+
+#Create a vector where each obesity level is assigned as a different color
+
+ob_level_color <- as.factor(df$NObeyesdad)
+
+# Undo log transformation in weight for a more interpretable visualization
+
+no_log_transf_weight <-exp(df$Weight) - 1
+
+# Plot the relationship between the height and the weight, based on the obesity level.
+
+plot(df$Height, no_log_transf_weight,
+     col = ob_level_color,
+     pch = 19,
+     main = "Height vs Weight by Obesity Type",
+     xlab = "Height",
+     ylab = "Weight")
+
+# Add a legend to better understand the graph
+legend("topleft",  
+       legend = levels(ob_level_color),
+       col = 1:length(levels(ob_level_color)),
+       pch = 19,
+       cex = 0.7,
+       xpd = TRUE)  
+
+
+```
+
+Here we can observe in this scatterplot the relationship between the weight, that we have use it without the log transformation that we have applied before so that the results were more interpretable, and the Height of the patients relate to the obesity levels.
+
+The colored dots represents the different obesity levels that can be observed, and the relationship between the weight and the height. It is clear that:
+
+-   The individuals that have a higher obesity levels (obesity_type_II and obesity_type_III) are clustered in the higher weight ranges, independently from the height. While the individuals with normal weight, as height increases, so does the weight, demostraging a normal growth pattern.
+
+-   There is a clear separation between the different categories, demonstrating that weight and height are strong predictors of the obesity class.
+
+### Analysis of the target variable NObeyesidad
+
+As our target variable is a multiclass factor that has different types obesity levels that can be chosen depending on different characteristics. This is why is essential to have a better understanding of the frequency of each obesity level, so that we can comprehend how each one is selected depending on the lifestyle and physical condition characteristics of the patients.
+
+```{r Target_Variable_Frequency, echo = TRUE, warning = FALSE}
+
+# Determine the frequency of each obestity level
+
+obesity_frequency <- table(df$NObeyesdad)
+
+# Extract the  obesity levels by first sorting the data in decreasing order 
+
+obesity_frequency_sorted <- sort(table(df$NObeyesdad),decreasing = TRUE)
+
+# Represent the obesity level frequency in a bar plot
+
+barplot(obesity_frequency_sorted,
+        main = "Frequency of the Obesity Level",
+        col = "lightblue",
+        las = 2)
+
+
+```
+
+As we can observe in the barplot, the variable `NObeyesdad` represents the obesity level category for each individual in the dataset, and it is a **multiclass factor** with seven classes that include:
+
+-   Insufficient_Weight\
+-   Normal_Weight\
+-   Overweight_Level_I\
+-   Overweight_Level_II\
+-   Obesity_Type_I\
+-   Obesity_Type_II\
+-   Obesity_Type_III
+
+We can also observe that:
+
+-   The most frequent class is `r names(obesity_frequency_sorted)[1]`, with `r obesity_frequency_sorted[1]` instances.
+-   The least frequent class is `r names(obesity_frequency_sorted)[length(obesity_frequency_sorted)]`, with only `r obesity_frequency_sorted[length(obesity_frequency_sorted)]` cases.
+
+There is also a small imbalance of the data towards the majority classes, we will handle it by using **stratified sampling** with the `caret` package to create the training and splitting data frames.
+
+## Identification of Principal Components (PCA)
+
+As explained in (@jaadi_pca_builtin2025) The Principal Component Analysis (PCA) is a dimensionality reduction method that reduces large data sets into fewer variables while preserving key data trends. It simplifies data by identifying uncorrelated components that capture the most variance, making analysis faster and more efficient.
+
+It does it by transforming the data into a new set of variables that are called principal components (PCs) that are uncorrelated and ordered by how much variance does they explain.
+
+In this case, we have included the BMI variable that has been derived from `Weight`and `Height`columns, introducing this new variable in the PCA analysis could introduce redundancy and multicollinearity, so we are not going to include this additional variable in the PCA analysis.
+
+```{r pca_analysis, echo = TRUE, warning=FALSE}
+
+# First we install if required the packages
+library(dplyr)
+
+# Determine the numeric variables of the dataset
+numeric_variables <- df[ , sapply(df, is.numeric)]
+
+# Exclude the BMI variable from the PCA analyis 
+numeric_variables_pca <- numeric_variables[, setdiff(names(numeric_variables), "BMI")]
+
+
+# Standarize the  numeric data
+scaled_numeric_variables <- scale(numeric_variables_pca)
+
+# Run the PCA 
+pca_results <- prcomp(scaled_numeric_variables, center = TRUE, scale. = TRUE,retx = TRUE)
+
+# Obtain the summary of the PCA
+summary(pca_results)
+
+# Display the PCA plot
+plot(pca_results, type = "l", main = "Plot of Principal Component Analysis")
+
+# Calculate proportion of variance
+explained_var <- pca_results$sdev^2 / sum(pca_results$sdev^2)
+
+# Show loadings of first 4 PCs and top 5 variables
+pca_results$rotation[1:5, 1:6]
+
+# Barplot of explained variance
+barplot(explained_var,
+        main = "Proportion of Variance Explained",
+        ylab = "Variance",
+        names.arg = paste0("PC", 1:length(explained_var)),
+        col = "lightblue")
+
+```
+
+From what we can observe in the PCA analysis, when we analyze the weights for the first 5 variables, that include, `Age`, `Height`, `Weight`, `FCVC` and `NCP` we can observe that:
+
+-   PC1 is majority influenced by height and weight, which are reflecting the Body Mass Index (BMI).
+
+-   PC2 is mostly influenced by Age and Weight, which could represents changes in the body related to age.
+
+-   PC3 is driven in its majority by FCVC, which is the vegetable consumption, demonstrating the importance of dietary behavior.
+
+-   PC4 has a strong negative influence by both NCP, which is the number of main meals, and by weight, representing s relationship between the eating patterns and the weight control.
+
+-   PC5 has a very strong positive influence of NCP and a smaller but also important influence of FCVC, and a negative influence of the weight. This could demonstrate that people who eat more meals and that they are healtier meals have a regulated eating behaviour as the weight decreases.
+
+-   P6 also has a high influence of NCP, while the rest of the variables show negative relationship, demonstrating that there is a compensation with the eating patterns as the individuals that consume more meals shouldn´t always correspond to an increase in weight or bmi.
+
+In both plots we can observe how much variance does each component accounts for and we can observe that the the first two componentes (PC1) and (PC2) are contributing the most to the variance,and that the remaining components contribute less in a progressive way.
+
+This analysis demonstrate how the six principal components can explain the 88% of the total variance of the model, this is why we decided to maintain all the original features in the models. We decided to continue with this approach as our dataset is rather small and the original features are interpretable which is really valuable to explain the model outputs, it doesn´t show a strong multicollinearity so there is no need to reduce the number of variables and we want to ensure that the models have a great interpretability.
+
+Nevertheless is important to take into consideration that these insight help us understand the underlying structure of the data, and to realize which factors are included on each component, which can be useful for feature interpretation or visualization in future modeling steps. In addition to this, this analysis had helped us to ensure the importance of taking into consideration and including the BMI variable in our analysis, as it is constitutes the principal component of the PCA analysis.
+
+# Data Preparation
+
+To ensue that we are going to achieve an optimal performance with the different algorithms that we are going to use, we are going to **create separate data subset** that will be prepared differently for each model, as each algorithm handles differently the categorical variables and feature encoding, the normalization, the presence of outliers and multicolinearity. This is why we will preprocess the data according to each model.
+
+As both Logistic Regression and Neural Networks require categorical variables to be numerically encoded, we will have to hot encode the categorical variables of the dataset. This is why by creating a funtion to performe the one-hot encoding will avoid redundancy in the code and will also ensure that there is consistency in the different preprocessing steps of the different datasets.
+
+```{r one_hot_encoding_function, echo=TRUE, warning = FALSE}
+
+# First we will define the function that takes three argument, the dataset, the targer column, and the argument drop_first to avoid multicollinearity
+one_hot_encode <- function(data, target_column, drop_first = TRUE) {
+  
+  # Make a copy of the dataset 
+  encoded_data <- data
+  
+  # Determine the the factor columns of the dataset
+  factor_cols <- sapply(encoded_data, is.factor)
+  
+  # Exclude the target column so that we don´t encode them
+  factor_cols[target_column] <- FALSE
+  
+  #Loop through each factor column to determine the number of levels
+  for (col in names(encoded_data)[factor_cols]){
+    
+    # Get all the levels of the category and store them in a variable
+    col_levels <- levels(encoded_data[[col]])
+    
+    # Drop the first level to avoid multicollinearity
+    levels_to_encode <- col_levels[-1]
+    
+    # Encode the different levels of the categorical variable using a loop
+    for (level in levels_to_encode) {
+      new_column <- paste ( col, level, sep = "_")
+      encoded_data[[new_column]] <- ifelse(encoded_data[[col]] == level, 1, 0)
+    }
+    
+    # Remove the original column that has been encoded
+    encoded_data[[col]] <- NULL #Drop the original factor
+    
+  }
+  
+  # Return the final encoded data
+  return(encoded_data)
+}
+
+```
+
+## Logistic Regression Data Preparation
+
+The logistic regression is a classifier that performs more efficiently when the different features that are analyzed are independent and scaled. This means that it requires the absence of multicollinearity and it cannot handle categorical variables directly. This is why, in this case we are going to perform **one-hot encoding and feature standardization**.
+
+### Z-Score Normalization
+
+```{r log_reg_data_prep_normalization, echo = TRUE, warning=FALSE}
+
+# Create a copy of the cleaned df
+df_log_reg <- df
+
+# Create a function that  normalizes the numeric vector v using z-score standardization
+z.normalize <- function (v) {
+  m <- mean(v)
+  s <- sd(v)
+  z <- ((v - m) / s)
+  return (z)
+}
+
+
+# Determine the columns that are going to be normalized, which are the continuous numeric columns
+columns_to_normalize <- names(df_log_reg)[sapply(df_log_reg, is.numeric)]
+
+for (column in columns_to_normalize) {
+  # z-score standardize a column
+  z.norm <-z.normalize(df_log_reg[,column])
+  
+  # replace column with normalized values
+  df_log_reg[,column] <- z.norm
+}
+
+head(df_log_reg)
+```
+
+As we know, in a logistic regression model if the different features that the models uses are in different scales, the algorithm won´t be able to treat them in the same way during the training, so it will give more importance to the variables that have larger values, causing overfitting. In order to avoid this we have uses *z-score standarization* and applied it to he continuous numeric variables. It transforms the data so that each feature has a mean of 0 and a standard deviation of 1, and ensures that all of the features contribute in the same way to the algorithm.
+
+### One-hot encoding
+
+```{r log_reg_data_prep_encoding, echo = TRUE, warning = FALSE}
+
+# Determine binary columns 
+binary_columns_log <- c("FAVC", "SMOKE", "SCC", "family_history_with_overweight")
+
+# Transform binary columns i
+for (col in binary_columns_log) {
+  df_log_reg[[col]] <- ifelse(df_log_reg[[col]] == "yes", 1, 0)
+}
+
+# Apply one-hot encoding to the categorical variables
+df_log_reg <- one_hot_encode(df_log_reg, target_column = "NObeyesdad")
+
+# Check that the encoding has been correctly performed
+str(df_log_reg)
+
+```
+
+We can observe that **all of the categorical variables except for the target variable have been correctly converted to numerically encoded variables**. This is essential for logistic regression as it requires all of the input features to be numeric as it computes a linear combination of them to determine the class probabilities.
+
+To do it we have performed **one-hot encoding** which converts each level of a factor variable into a separate binary column, given the value of 0 if is not that level and 1 if is that level. During the encoding process, we have not taken into consideration the first level of each encoded variable to avoid including redundant information that can lead to the presence of multicollinearity, which can affect the interpretation of our model.
+
+### Justification of the Multimodal Logistic Regression Model
+
+I have selected the multimodal logistic regression model because, as my project is focused on a multi-class classification problem, and this model provides a strong and interpretable baseline, I believed that it could benefit my analysis.
+
+This model is able to handle not only categorical, but also numerical variables, that are the variables that constitute our dataset, after performing a correct preprocessing step that includes normalization and one-hot encoding, and that we have recently performed .
+
+In addition to this, as this model assumes linear relationships and it requires the absence of multicollinearity between the predictors, I have analyzed the correlations and distributions of the variables to ensure that these assumptions are fulfilled.
+
+Another key reason that lead me to chose this model is because of its transparency, which allows me to better understand how different features such as BMI or physical activity can have an influence on the probability of belonging to each different obesity category.
+
+## Decision Tree Data Preparation
+
+Decision trees are non-linear classifiers that can handle categorical variables, this is why it doesn´t require encoding or scaling of the variables. In addition to this, they are also robust at handling outliers and they are able to determine complex relationships between the features. This is why, in this case we only have to reassure that the **categorical variables are correctly encoded as factors**. As this ensures that the tree can determine and handle properly these features during the training process of the model.
+
+```{r decision_tree_prep_encoding, echo = TRUE, warning = FALSE}
+
+# Create a copy of the cleaned df
+df_dec_tree <- df
+
+# Determine the categorical variables
+categorical_column <- c("Gender", "family_history_with_overweight", "FAVC",
+                      "CAEC", "SMOKE", "SCC", "CALC", "MTRANS", "NObeyesdad")
+
+# Create a loop that convert each column into a factor
+for ( col in categorical_column) {
+  df_dec_tree[[col]] <- as.factor(df_dec_tree[[col]])
+}
+
+# Check that the categorical columns are correctly stored as factors
+str(df_dec_tree)
+```
+
+Here we can observe that the categorical columns `Gender`,`family_history_with_overweight`,`FAVC`,`CAEC`, `SMOKE`, `SCC`, `CALC`, `MTRANS`, `NObeyesdad` are factors and can be correctly handled by the decision tree model.
+
+### Justification of the Decision Tree Model
+
+I have selected the decision tree model because, as in this dataset we are analyzing behavioral and lifestyle variables, and the decision trees have the ability to model non-linear relationships between features, I believed that it will give me valuable information about my data. As it is also well-suited to handle the interaction between the variables, it can enhance the obesity types predictions.
+
+In addition to this, unlike logistic regression or neural networks, decision trees require less preprocessing steps, as they don´t need feature scaling or encoding of the categorical variables, simplifying the preprocessing step.
+
+Moreover, as the dataset contains information that will be shared and used with an audience that doesn´t comprehend the technical aspect of the analysis, as decision trees are easily interpretable and visually intuitive, I believe that it will be well-suited for its use in public health.
+
+Additionally, decision trees are interpretable and visually intuitive, which is ideal when communicating results to a non-technical audience in a public health or clinical context.
+
+## Neural Network Data Preparation
+
+Neural Networks are classifiers that are able to model non-linear relationships between the variables but, similarly to the logistic regression model, they require **normalize data** and **one-hot encoding** for categorical variables, and **numeric inputs**. Moreover, they are more sensitive to data preparation and this is why we have to be more careful at the data preparation step.
+
+Although the data preprocessing steps are the same as the ones required for logistic regression, I will perform them separately to ensure and maitain that the data can be easily reproducible and to have more flexibility when we tune each model independently.
+
+### Z-Score Normalization
+
+```{r nn_data_prep_normalization, echo = TRUE, warning=FALSE}
+
+# Create a copy of the cleaned df
+df_nn <- df
+
+# Create a function that  normalizes the numeric vector v using z-score standardization
+z.normalize <- function (v) {
+  m <- mean(v)
+  s <- sd(v)
+  z <- ((v - m) / s)
+  return (z)
+}
+
+
+# Determine the columns that are going to be normalized, which are the continuous numeric columns
+columns_to_normalize <- names(df_nn)[sapply(df_nn, is.numeric)]
+
+for (column in columns_to_normalize) {
+  # z-score standardize a column
+  z.norm <-z.normalize(df_nn[,column])
+  
+  # replace column with normalized values
+  df_nn[,column] <- z.norm
+}
+
+head(df_nn)
+```
+
+### One-hot encoding
+
+```{r nn_data_prep_encoding, echo = TRUE, warning = FALSE}
+
+# Determine binary columns 
+binary_columns_log <- c("FAVC", "SMOKE", "SCC", "family_history_with_overweight")
+
+# Transform binary columns i
+for (col in binary_columns_log) {
+  df_nn[[col]] <- ifelse(df_nn[[col]] == "yes", 1, 0)
+}
+
+# Apply one-hot encoding to the categorical variables
+df_nn <- one_hot_encode(df_nn, target_column = "NObeyesdad")
+
+# Check that the encoding has been correctly performed
+str(df_nn)
+
+```
+
+### Justification of the Neural Network Model
+
+I have selected a neural network model because, it aligns perfectly with the two previously selected models (linear regression and decision trees), as it is better at modeling complex non-linear patterns that could not be captured by those simpler models.
+
+In addition to this, as mentioned before, as the target variable has seven different classes and the relationship between the different variables are non-linear and independent, the use of a neural network models improves the flexibility of the model to identify and determine these complex patterns in the data.
+
+Similarly to logistic regression, this model can handle correctly our dataset, as it is able to use categorical and numerical variables if the dataset is correctly preprocessed, doing normalization of the numerical variables and one-hot encoding for the categorical variables.
+
+Is important to take into consideration that it can be less interpretative than the other models, but as is can achieve a higher performance, it is an essential component of the heterogenous ensemble.
+
+# Modeling
+
+## Create random training and testing subsets
+
+In order to evaluate and validate our models, we are going to split out encoded datasets into two separate subsets: training and testing subsets. This is going to allow us to train the model on one part of the data and determine its performance on unseen data (test subset).
+
+Using `createDataPartition()` from the caret package, we divide the data and ensure that the proportion of our target variable `(NObeyedad)` is the same in both subsets. We are going to use a 70:30 split where 70% of the data is used for training and 30% is for testing, and we have set a seed to ensure reproducibility.
+
+```{r create_subsets,echo=TRUE,warning=FALSE}
+
+# Load library
+library(caret)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Logistic Regression Data
+
+## Get row index and use a specific split with an 70:30 ratio, where 70% is the trainig data and 30% is testing data
+split_values_log <- createDataPartition(df_log_reg$NObeyesdad,p=0.7,list=FALSE)
+
+## Create test and training dataset 
+df_log_train<- df_log_reg[split_values_log,]
+df_log_test <- df_log_reg[-split_values_log,]
+
+## Check if the dataset has been correctly splitted in a 70:30 ratio
+nrow(df_log_train)  
+nrow(df_log_test) 
+
+# Decision Tree Data
+
+## Get row index and use a specific split with an 70:30 ratio, where 70% is the trainig data and 30% is testing data
+split_values_dec_tree <- createDataPartition(df_dec_tree$NObeyesdad,p=0.7,list=FALSE)
+
+## Create test and training dataset 
+df_dec_tree_train<- df_dec_tree[split_values_dec_tree,]
+df_dec_tree_test <- df_dec_tree[-split_values_dec_tree,]
+
+## Check if the dataset has been correctly splitted in a 70:30 ratio
+nrow(df_dec_tree_train)  
+nrow(df_dec_tree_test) 
+
+# Neural Network Data
+
+## Get row index and use a specific split with an 70:30 ratio, where 70% is the trainig data and 30% is testing data
+split_values_nn <- createDataPartition(df_nn$NObeyesdad,p=0.7,list=FALSE)
+
+## Create test and training dataset 
+df_nn_train<- df_nn[split_values_nn,]
+df_nn_test <- df_nn[-split_values_nn,]
+
+## Check if the dataset has been correctly splitted in a 70:30 ratio
+nrow(df_nn_train)  
+nrow(df_nn_test) 
+```
+
+As we can observe from the results that we have obtained, after splitting the dataset we have check and ensure that the data has been correctly divided in a 70:30 ratio.
+
+## Multinomial logistic regression model
+
+### Initial Multinomial Logistic Regression model
+
+In this part of the analysis we have created an **multinomial logistic regression model** using the `nnet`package, as the target variable is a multinomial variable that has 7 different obesity categories. The model is trained using all the variables and its performance is evaluated using the test set, with the accuracy and macro-averaged F1-score.
+
+```{r multinomial_logistic_reg,echo=TRUE,warning=FALSE}
+
+# Load the required package
+library(nnet)
+
+# Train the model using the training data
+log_reg_model <- multinom(NObeyesdad ~ ., data = df_log_train)
+
+# Make predictions of the model using the testing data
+log_reg_predictions <- predict(log_reg_model, df_log_test, type = "class")
+
+# Check that the predicted and actual values are factors
+log_reg_predicted <- factor(log_reg_predictions)
+log_reg_actual <- factor(df_log_test$NObeyesdad)
+
+# Evaluate the performance of the model using a confusion matrix
+log_reg_conf_matrix <- confusionMatrix(log_reg_predicted, log_reg_actual)
+
+# Calculate metrics
+log_reg_precision <- log_reg_conf_matrix $byClass[, "Precision"]
+log_reg_sensitivity <- log_reg_conf_matrix$byClass[, "Sensitivity"]
+
+# Calculate F1-score
+log_reg_f1 <- 2 * (log_reg_precision * log_reg_sensitivity) / (log_reg_precision + log_reg_sensitivity)
+
+# Calculate the macro f1-score and the accuraccy
+log_reg_macro_f1 <- mean(log_reg_f1, na.rm = TRUE)
+log_reg_accuracy <- log_reg_conf_matrix$overall["Accuracy"]
+
+```
+
+The results of the model demonstrate that it has achieved great predictive performance across the different obesity classes. Specifically, it has achieved:
+
+-   An **accuracy** of `r round(log_reg_accuracy * 100, 2)`%
+
+-   A **macro averaged F1-score** of `r round(log_reg_macro_f1,2)`.
+
+### Multinomial Logistic Regression Hyperparameter Tuning – Feature Selection via LASSO
+
+To reduce model complexity and prevent overfitting, I employed **LASSO (Least Absolute Shrinkage and Selection Operator)** for feature selection. As mentioned in (@hastie2009elements) LASSO applies an L1 penalty that not only shrinks coefficients but also sets many to exactly zero, making it effective for variable selection in high-dimensional settings, as it eliminates the predictiors that are less informative.
+
+The will result in a simpler and more interpretable model that only maintains the most relevant features while maintaining predictive power of the model. The implementation follow the approach that is outlined in (@sthda_penalized_logistic).
+
+As the target variable (`NObeyesdad`) is **multinomial**, I have used the `glmnet` package with `family = "multinomial"`, and the optimal penalty parameter (lambda) was selected using cross-validation. Then, after fitting the model, I determined the predictors with coefficients different from zero across all classes, and then used only these features to fit a final model using the `VGAM` package (@vglm_reference_manual).
+
+```{r log_reg_hyperparmeter_LASSO, echo=TRUE, warning=FALSE}
+
+# Load the required packages
+library(glmnet)
+
+# Ensure target variable is a factor and determine the reference class, which in this case is `Normal_Weight` that the model will use as a baseline for comparison 
+df_log_reg$NObeyesdad <- relevel(factor(df_log_reg$NObeyesdad), ref = "Normal_Weight")
+
+# Create the model matrix for predictors where the categorical variables are dummy coded and removes the intercept (-1)
+x <- model.matrix(NObeyesdad ~ . - 1, data = df_log_reg)
+
+# Create the response variable, which has to be a factor 
+y <- df_log_reg$NObeyesdad
+
+# Set seed for reproducibility
+set.seed(123) 
+
+# Fit the LASSO using cross-validation to determine the best regularization strength, the cv.glmnet performs 10-fold-cross-validation by default
+lasso_cross_valid_model <- cv.glmnet(x,
+                      y,
+                      family = "multinomial", 
+                      alpha = 1) 
+
+# Determine the best value of lambda, that will be used to minimize the cross-validation error
+lasso_best_lambda <- lasso_cross_valid_model$lambda.min
+
+# Determine the coeficients from the model using the best lambda
+lasso_coef <- coef(lasso_cross_valid_model, s = lasso_best_lambda )
+
+# Select only the features which coefficients are different from zero 
+selected_features <- unique(unlist(lapply(lasso_coef , function(coef_matrix) {
+  rownames(coef_matrix)[which(coef_matrix[, 1] != 0)]
+})))
+
+# Removes the intercept from the features
+selected_features <- setdiff(selected_features, "(Intercept)")
+
+# Visualization of the final selected features used to refit the model
+print(selected_features)
+
+```
+
+The results that we have obtained after performing LASSO is that **the predictors that have the highest contribution to the classification tasks** are:
+
+-   `r selected_features`
+
+This means that these features are considered to have the greatest amount of valuable information for our classification task, and this is why we are going to use them to refit the model.
+
+```{r log_reg_hyperparmeter_LASSO_evaluation, echo = TRUE, warning=FALSE}
+
+# Load the required libraries
+library(VGAM)
+library(caret)
+
+# Determine the features that has been selected by LASSO
+lasso_selected_features <- c(
+  "Age", "Weight", "family_history_with_overweight", "FAVC", "FCVC", "NCP",
+  "CH2O", "SCC", "FAF", "BMI", "Gender_Male", "CAEC_Frequently",
+  "CAEC_no", "CAEC_Sometimes", "CALC_Frequently", "MTRANS_Motorbike",
+  "MTRANS_Public_Transportation", "MTRANS_Walking", "Height", "SMOKE",
+  "TUE", "CALC_no", "MTRANS_Bike", "CALC_Sometimes"
+)
+
+# Determine the new formula using the lasso selected features
+new_formula <- as.formula(paste("NObeyesdad ~", paste(lasso_selected_features, collapse = " + ")))
+
+# Determine the new model
+log_reg_hypertuned_model <- vglm(new_formula, data = df_log_reg, family = multinomial)
+
+# Predict the probabilities for each observation 
+log_reg_hypertuned_model_predicted_probabilities <- predict(log_reg_hypertuned_model, newdata = df_log_reg, type = "response")
+
+# Convert the predicted probabilities into predicted class labels, by using the class with the highest probability for each row.
+log_reg_hypertuned_model_predicted_classes <- apply(log_reg_hypertuned_model_predicted_probabilities, 1, function(x) {
+  levels(df_log_reg$NObeyesdad)[which.max(x)]
+})
+
+# Ensure that the predicted probabilities are factors with the same levels as our target variable
+log_reg_hypertuned_model_predicted_classes <- factor(log_reg_hypertuned_model_predicted_classes, levels = levels(df_log_reg$NObeyesdad))
+
+# Determine the the actual class labels
+log_reg_hypertuned_model_actual_classes <- df_log_reg$NObeyesdad
+
+# Determine the confusion matrix
+log_reg_hypertuned_model_confusion_matrix <- confusionMatrix(log_reg_hypertuned_model_predicted_classes, log_reg_hypertuned_model_actual_classes)
+
+# Determine the metrics
+log_reg_hypertuned_model_precision  <- log_reg_hypertuned_model_confusion_matrix$byClass[, "Precision"]
+log_reg_hypertuned_model_sensitivity <- log_reg_hypertuned_model_confusion_matrix$byClass[, "Sensitivity"]
+
+# Compute F1-score for each class
+log_reg_hypertuned_model_f1_score <- 2 * (log_reg_hypertuned_model_precision * log_reg_hypertuned_model_sensitivity) / (log_reg_hypertuned_model_precision + log_reg_hypertuned_model_sensitivity)
+
+# Calculate macro-averaged F1 score 
+log_reg_hypertuned_model_macro_f1 <- mean(log_reg_hypertuned_model_f1_score, na.rm = TRUE)
+
+# Calculate accuracy
+log_reg_hypertuned_model_accuracy <- mean(log_reg_hypertuned_model_predicted_classes == log_reg_hypertuned_model_actual_classes)
+
+```
+
+After the evaluation of both, the initial multinomial logistic regression model and the hypertuned model using Lasso for feature selection, we can observe important differences in the performance of the models.
+
+The initial model, which was trained will all the available features, achieved:
+
+-   Accuracy: `r round(log_reg_accuracy * 100, 2)`%
+-   Macro F1-score: `r round(log_reg_macro_f1, 4)`
+
+The hypertuned model, which was trained with the selected features identified by LASSO, achieved:
+
+-   Accuracy: `r round(log_reg_hypertuned_model_accuracy * 100, 2)`%
+-   Macro F1-score: `r round(log_reg_hypertuned_model_macro_f1, 4)`
+
+### Homogeneous Ensemble of Multinomial Logistic Regression Models Using Bootstrap
+
+
+In this part of the analysis we are going to implement a **bagging approach** as we are going to use **multinomial logistic regression** to model the different obesity levels of the variable (`NObeyesdad`) as a multiclass classification problem.
+
+In order to reduce variance and bias, we are going to create multiple different random subset of the data, to train the logistic regression model. To do it we are going to use **bootstrap sampling**, so 10 different random training subsets are generated from original training data.Each sample is created by sampling 70% of the training data with replacement, this allows each subset to be different but preserving the general characteristics of the data.
+
+```{r create_bagged_train_subsets,echo=TRUE,warning=FALSE}
+
+# Determine the number of partitions and sample size
+n_partitions <- 10
+sample_size <- round(0.7 * nrow(df_log_train))
+
+# Create a list to hold the different partitions
+partitions <- list()
+
+# Generate the different partitions with replacement from the training data
+for (i in 1:n_partitions) {
+  
+  # Sample the row indices with replacement
+  sampled_indices <- sample(1:nrow(df_log_train), 
+                            size = sample_size, 
+                            replace = TRUE)
+  
+  # Create the subset
+  partitions[[i]] <-df_log_train[sampled_indices, ]
+}
+
+# Inspect the first rows of the partition
+head(partitions[[1]],5)
+
+
+```
+
+We have checked that the partitions had been correctly created and that each contains a boostrap sample of 70% of the original training subset, generated with replacement. This is going to ensure that our multiclass logistic regression model is going to be able to capture different patterns of the data and reduce variance.
+
+### Train the Homogeneous Ensemble Logistic Regression on Bootstrapped Partitions
+
+In this part of the analysis, we are going to train the multinomial logistic regression models by using the 10 subsets that we have created earlier, using the `multinom()` function from the `nnet` package, as mentioned in @nnet_reference_manual, including only the predictors determined via LASSO, as they achieved better performance. We are going to specifically use this method as our target variable has 7 different levels.
+
+```{r multiclass_logistic_reg,echo=TRUE,warning=FALSE}
+
+# Load the nnet package
+library(nnet)
+        
+# Create list to store the trained models
+store_multi_logistic_models <- list()
+
+# Fit logistic regression model on each boostraped sample
+for (i in 1:length(partitions)){
+  log_training_data <- partitions[[i]]
+  
+  # Logistic regression for full model
+  lasso_formula <- as.formula(paste("NObeyesdad ~", paste(lasso_selected_features, collapse = " + ")))
+full_multi_logistic_model <- multinom(lasso_formula, data = log_training_data)
+  
+  store_multi_logistic_models[[i]] <-  full_multi_logistic_model
+}
+
+```
+
+By using all the available features in each model we make sure that all of the potentially informative variables are included.
+
+### Generate Ensemble Predictions from Bagged Models
+
+In this part of the analysis, we use our trained multinomial logistic regression model on each of the 10 bootstrap training subsets that we have previously created, to create predictions of the target variable `NObeyesdad`using the test data. The predictions from these models are stored in a matrix where each column represents the respective model.
+
+**This will be the basis of our homogeneous ensemble**, that combines different weaker models to achieve a more robust and generalized final prediction.
+
+```{r multi_logistic_models_predictions,echo=TRUE,warning=FALSE}
+
+# Count the number of multiply logistic models
+number_models <- length(store_multi_logistic_models)
+
+# Createaft a matrix of 0 to store the predictions 
+multi_logistic_model_pred <- matrix(0,nrow=nrow(df_log_test),ncol=number_models)
+
+# Create a loop that will go through each model making predictions using the test dataset
+for(i in 1:number_models){
+  multi_logistic_model_pred [,i] <- predict(store_multi_logistic_models[[i]],df_log_test,type="class")
+}
+
+```
+
+So, we have created a collection of models and store them in a matrix so that we can use them to generate individual predictions on the test set.
+
+### Evaluate each individual bagged model using F1 score and accuracy
+
+In this step, we have **evaluated the performance of each individual multinomial logistic regression model using the F1-score and accuracy** to identify the model that performs the best.
+
+As there are different categories in our target variable `NObeyesdad`, as is a multiclass variable, we are going to calculate the F1 score for each class individually and then compute the average F1 score of across all of the classes of the target variables so that we get the F1 score of ech model. With this method we are going to make sure that each class will have an equal contribution to the final performance score.
+
+The F1-score is a more robust analysis to ealuate multiclass performance, nevertheless we have also calcualted the accuracy, which measures the proportion of correct predictions made by of our model, over the total number of predictions on the test set, so that we can we are able to compare our models directly with those in the paper of Kabongo and Luzolo [@kabongo2020five], who used accuracy as their evaluation metric.
+
+```{r calc_F1_score_accuracy ,echo=TRUE}
+
+# Load library
+library(caret)
+
+# Get actual label for NObeyesdad (target variable)
+actual_label_logistic <- factor(df_log_test$NObeyesdad)
+
+# Determine the class levels 
+class_levels <- levels(actual_label_logistic)
+
+# Initialize vector to store averaged F1 values for each model
+f1_val_logistic <- numeric(number_models)
+
+# Initialize vector to store accuracy for each model
+accuracy_val_logistic <- numeric(number_models)
+
+# Initialize vector to store the macro averaged F1 values
+macro_averaged_f1_val_logistic <- numeric(number_models)
+
+# Create a loop to calculate the F1 score on each model
+for(model in 1:number_models){
+  
+  # Convert the predicted numeric values into class labels
+  predicted_numeric <- multi_logistic_model_pred[, model]
+  
+  # Determine the predicted label
+  predicted_label <- factor(class_levels[predicted_numeric], levels = class_levels)
+  
+  # Construct confusion Matrix to compare predicted vs actual labels
+  con_mat_logistic <-confusionMatrix(predicted_label ,actual_label_logistic)
+  
+  # Calc F1 score by getting precision and recall on each class
+  precision_logistic <- con_mat_logistic$byClass[,"Precision"]
+  sensitivity_logistic <- con_mat_logistic$byClass[,"Sensitivity"]
+
+  # Calc and store F1 score for each class
+  f1_class <-  2 * (precision_logistic  * sensitivity_logistic)  / (precision_logistic +sensitivity_logistic)
+  
+  # Calc the Macro average F1 score of each model using the average
+  macro_averaged_f1_val_logistic[model] <- mean(f1_class, na.rm = TRUE)
+  
+  # Calculate the overall accuracy of each model
+  accuracy_val_logistic[model] <- con_mat_logistic$overall["Accuracy"]
+}
+  
+
+# Get model with highest F1 score
+best_logistic_model_index <- which.max(macro_averaged_f1_val_logistic)
+best_f1_score <- macro_averaged_f1_val_logistic[best_logistic_model_index]
+best_accuracy <- accuracy_val_logistic[best_logistic_model_index]
+
+
+```
+
+Thus,the model with the highest averaged F1-score is `r best_f1_score` and its overall accuracy is `r round(best_accuracy * 100, 2)`%.
+
+### Evaluate homogenous ensemble performance using K-Fold Cross-Validation
+
+In order to evaluate the performance of the multinomial logistic regression in a more robust way, and avoid overfitting, I am going to apply **10-fold cross-validation** by using the `caret` package.
+
+What this does is divide the dataset into ‘k’ equally (or nearly equally) sized folds or subsets, in this case 10 folds, using the `createFolds` function as mentioned in (@splitTools_create_folds). We have decided to use 10 folds because as mentioned in (@kuhn2017estimating) *"empirical evidence suggests that there is little added benefit to using a greater number. For each of the 10 folds (each comprising 10 percent of the total data), a machine learning model is built on the remaining 90 percent of data."*
+
+So the model is trained ‘k’ times,in this case 10 times, each time using a different fold as the testing set, and the remaining ‘k-1’ folds as the training set. This ensures that **every observation from the original dataset has the chance of appearing in the training and test set.**
+
+By using the trained logistic regression models that we had previously created using bagging, for each fold's validation set there have been predictions generated. Then, these predictions from the 10 different models were aggregated using majority voting and, for each fold, we have computed the macro-averaged F1-score, as we have a multiclass classification.
+
+```{r k_fold_log_reg, echo = TRUE, warning = FALSE}
+
+# Load library
+library(caret)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Determine the folds using the caret package and store then on a list
+k_folds <- createFolds(df_log_train$NObeyesdad, k = 10)
+
+# Initialize result lists
+log_reg_macro_f1_results_k <- list()
+log_reg_accuracy_results_k <- list()
+
+# Determine the results on each fold using the fold´s indices and the training set
+for ( fold in seq_along(k_folds)) {
+  
+  # Determine the validation index
+  validation_index <- k_folds[[fold]]
+  
+  # Determine the validation data using using the row indices of the current fold
+  validation_data <- df_log_train[validation_index,]
+  
+  # Create a matrix to store the predictions of each logistic regression model for the current fold
+  predictions_matrix <- matrix(NA, 
+                               nrow = nrow(validation_data), 
+                               ncol = length(store_multi_logistic_models))
+  
+  # Predict on each model and store the values in the matrix
+  for ( model in 1:length(store_multi_logistic_models)){
+    predictions_matrix[, model] <- as.character(predict(store_multi_logistic_models[[model]], validation_data, type = "class"))
+  }
+  
+  # Determine majority vote aggragation by counting how many models predicted each class for each row, and get the most frequent class
+  majority_vote_k <- apply(predictions_matrix, 1, function(x) {
+    table <- table(x)
+    names(which.max(table))
+  })
+  
+  # Convert the predictions and actual lavels into factors with the same class legels
+  predicted_labels_k <- factor(majority_vote_k, levels = levels(df_log_train$NObeyesdad))
+  actual_labels_k <- factor(validation_data$NObeyesdad, levels = levels(df_log_train$NObeyesdad))
+  
+  # Create the confusion matrix to compare predicted and actual labels
+  confusion_matrix_k <- confusionMatrix(predicted_labels_k, actual_labels_k)
+  
+  #Calc F1 score by getting precision and recall on each class
+  precision_logistic_k <- confusion_matrix_k$byClass[,"Precision"]
+  sensitivity_logistic_k <- confusion_matrix_k$byClass[,"Sensitivity"]
+
+  # Calc and store F1 score for each class
+  log_reg_f1_class_k <-  2 * (precision_logistic_k  * sensitivity_logistic_k)  / (precision_logistic_k +sensitivity_logistic_k)
+  log_reg_macro_f1_k <- mean(log_reg_f1_class_k, na.rm = TRUE)
+
+  # Calc the Macro average F1 score of each model using the average
+  mean(log_reg_f1_class_k ,na.rm = TRUE)
+  
+  # Calculate Accuracy
+  log_reg_accuracy_k <- confusion_matrix_k$overall["Accuracy"]
+  
+  # Store the results in the previously created lists
+  log_reg_macro_f1_results_k[[fold]] <- log_reg_macro_f1_k
+  log_reg_accuracy_results_k[[fold]] <- log_reg_accuracy_k
+  
+}
+
+# Determine the overall final average across all 10 folds
+log_reg_average_macro_f1_k <- mean(unlist(log_reg_macro_f1_results_k))
+log_reg_average_accuracy_k <- mean(unlist(log_reg_accuracy_results_k ))
+
+```
+
+So, the perfomance of the model was determined by the **macro-averaged F1-score**, calcualted for each fold, which ensures that each class of our multiclass target variable has receive an equal weight. Then I calculated the average of the F1-scores across all 10 folds to determine the overall performance metric.
+
+We have follow this approach as it reduces the overfitting risk and also confirms the stability and consistency of the logistic regression ensemble with different data partitions.
+
+Thus, the final cross-validated macro F1-score of the model is: `r round(log_reg_average_macro_f1_k, 4)` and the accuracy is `r round(log_reg_average_accuracy_k,4)`
+
+### Final Evaluation of Homogeneous Logistic Regression Ensemble
+
+In this section, we evaluate the performance of the **homogeneous ensemble** created from our 10 multinomial logistic regression models.
+
+Rather than selecting a single best model, we combine the strengths of all models by using **majority voting** where the most frequently predicted class label for each observation will be selected as the final prediction. This aggregation stabilizes the prediction by smoothing out fluctuations caused by the peculiarities of any single training sample.
+
+```{r evaluate_homogeneous_log_ensemble,echo=TRUE,warning=FALSE}
+
+# Load library
+library(caret)
+
+# Get actual label for NObeyesdad (target variable)
+log_actual_label_logistic <- factor(df_log_test$NObeyesdad)
+
+# Determine the class levels 
+class_levels <- levels(actual_label_logistic)
+
+# Convert the predicted numeric values to factor levels
+log_hom_ensemble_predictions_matrix <- apply(multi_logistic_model_pred,2, function(col) {
+  factor(class_levels[col], levels = class_levels)
+})
+
+# Perform majority voting on each row of the matrix
+cal_majority_vote <- function(row){
+  tab <- table(row)
+  names(which.max(tab))
+}
+
+# Determine the homogeneous ensemble predictions
+log_hom_ensemble_pred <- apply(log_hom_ensemble_predictions_matrix, 1, cal_majority_vote)
+log_hom_ensemble_pred <- factor(log_hom_ensemble_pred, levels = class_levels)
+
+# Create the confusion matrix
+log_hom_ensemble_pred_conf_matrix <- confusionMatrix(log_hom_ensemble_pred, log_actual_label_logistic)
+
+# Determine the metrics
+log_hom_ensemble_precision <- log_hom_ensemble_pred_conf_matrix$byClass[, "Precision"]
+log_hom_ensemble_sensitivity <- log_hom_ensemble_pred_conf_matrix$byClass[, "Sensitivity"]
+log_hom_ensemble_f1_class <- 2 * (log_hom_ensemble_precision * log_hom_ensemble_sensitivity) / (log_hom_ensemble_precision + log_hom_ensemble_sensitivity)
+
+# Calculate the macro-average F1 score and the overall accuracy
+log_hom_ensemble_f1_score <- mean(log_hom_ensemble_f1_class)
+log_hom_ensemble_accuracy <- log_hom_ensemble_pred_conf_matrix$overall["Accuracy"]
+
+```
+
+Thus, the results that we have achieved for the homogenous ensemble are:
+
+-   **F1-score**: `r round(log_hom_ensemble_f1_score, 4)`
+-   **Accuracy**: `r round(log_hom_ensemble_accuracy * 100, 2)`%
+
+This results demonstrate that when aggregating multiple logistic regression models using ensemble learning provides a robust multiclass classifier, and also enables direct comparison with models evaluated solely on accuracy, such as in the study by Kabongo and Luzolo.
+
+## Decision Tree
+
+### Baseline Decision Tree Classifier using "rpart"
+
+```{r Decision_Tree_Creation, echo = TRUE}
+
+# Load the "rpart" package
+library(rpart)
+
+# Now we will train the decision tree classifier using the Gini Index as measure of the impurty of the data.
+
+decision_tree <- rpart(
+  formula = NObeyesdad ~ ., # We specify the target variable (y) and select all of the other variable as predictors
+  data = df_dec_tree_train, # Select the training dataset 
+  method = "class", # Select the classification task based on a categorical prediction
+  parms = list(split = "gini")
+)
+
+
+```
+
+In this part of the analysis we have used the `(rpart)` package to build our decision tree, with the "class" method to indicate the function that we are doing a classification task based on the prediction of a categorical outcome. The feature that is selected to best separate the data at each step of the tree is the **Gini Index**, which is a metric that is used to measure the impurity or disorder in the data.
+
+### Visualizing the Baseline Decision Tree Model
+
+```{r Decision_Tree_Visualization, echo = TRUE, warning = FALSE}
+
+# Now load the package"rpart.plot"
+library(rpart.plot)
+
+# Display your decision tree
+
+rpart.plot(decision_tree)
+```
+
+We use the `(rpart.plot)`package to create a clean and easily understandable decision tree plot from models that have been built using the `(rpart)` package, as we did.
+
+On the results of our decision tree we can observe that it is predicting our target variable NObeyesdad , using different inputs features from the data set. From what we can observe, the two key factors that affect our data are `(BMI)` and `(Gender)`, being `(BMI)` the most important one.
+
+What we can observe is that individuals with higher BMI values (BMI \> 3.4) are more likely to be classified as having `Obesity_Type_I` and the model further differences between the obesity types.
+
+### Evaluation of the Baseline Decision Tree Model
+
+
+```{r Decision_Tree_Model_Evaluation, echo = TRUE,  warning = FALSE}
+
+# Load the "caret" package
+library(caret)
+
+# Exclude the target variable from the testing data set
+
+testing_features <- df_dec_tree_test[ , names(df_dec_tree_test) != "NObeyesdad"]
+
+# Make predictions using the features of the testing data set ( minus the target column " NObeyesdad")
+
+predicted_values <- predict(decision_tree, testing_features, type = "class")
+
+# Make sure that the predicted and the actual values have the same levels, as it is required by the confusion matrix.
+
+# Factor the actual and values
+actual_values_factored_dec_tree <- factor(df_dec_tree_test$NObeyesdad)
+
+predicted_values_factored_dec_tree <- factor(predicted_values, levels = levels(actual_values_factored_dec_tree))
+
+# Create confusion matrix to compare the predicted with the actual values
+
+confusion_matrix_dec_tree <- confusionMatrix(predicted_values_factored_dec_tree, actual_values_factored_dec_tree)
+
+# Print the confusion matrix
+print(confusion_matrix_dec_tree)
+
+# Calculate F1 score 
+dec_tree_precision <- confusion_matrix_dec_tree$byClass[, "Precision"]
+dec_tree_sensitivity <- confusion_matrix_dec_tree$byClass[, "Sensitivity"]
+
+# Compute F1-score per class
+dec_tree_f1_score <- 2 * (dec_tree_precision * dec_tree_sensitivity) / (dec_tree_precision + dec_tree_sensitivity)
+
+# Compute Macro-averaged F1-score
+dec_tree_macro_f1 <- mean(dec_tree_f1_score, na.rm = TRUE)
+
+# Determine the accuracy
+dec_tree_accuracy <- confusion_matrix_dec_tree$overall["Accuracy"]
+
+```
+
+We have used a confusion matrix to analyze the performance of our classification model, as it displays not only how many predictions were correct but also how are the errors distributed, as it breaks down the predictionss in four categories: True Positive (TP), False Positive(FP), False Negative (FN) and True Negative (TN), which help us to determine the overall accuracy, the sensitivity and the specificity of our model.
+
+In this case, after using the validation dataset to evaluate our decision tree model, the results that we have obtained are:
+
+-   An **overall accuracy** of `r round(dec_tree_accuracy * 100, 2)`%
+
+-   A **sensitivity and specificity** range of values that are higher in all the different categories, exceeding 96% for each class, demonstrating that the model has great ability to detect each obesity type.
+
+-   A **macro averaged F1-score** of `r dec_tree_macro_f1`.
+
+Based on this results we can state that our models performs very well, as it is able to differentiate between the different classes, despite the fact that, as we have mentioned before, there are two type of classes (Obesity_Type_I and Obesity_Type_II) that were more imbalanced.
+
+### Tuning the Complexity Parameter (`cp`) and Pruning the Decision Tree
+
+Once an initial model is trained and evaluated, we can tune model parameters or try out engineered features to see if the model’s accuracy, F1-Score, precision, or recall can be improved to better suit the model.
+
+To determine if our model could be simplified, without modifying the accuracy, we are going to apply **cost-complexity pruning** using the `rpart` function to plot the cost-complexity pruning path for a decision tree that has been fitted.
+
+```{r Decision_tree_CP_tuning, echo = TRUE, warning=FALSE}
+
+# Use the plotcp function to plot the cost-complexity pruning path for the decision tree.
+
+plotcp(decision_tree)
+
+# Prune the tree based on the optimal cp value
+optimal_cp_value <- decision_tree$cptable[which.min(decision_tree$cptable[, "xerror"]), "CP"]
+
+# Create the pruned tree
+pruned_tree <- prune(decision_tree, cp = optimal_cp_value)
+
+# Re-evaluate the pruned tree using the validation data
+pruned_tree_predicted_values <-predict(pruned_tree, testing_features, type = "class")
+
+# As we did before, we will ensure that the factor levels match.
+
+pruned_tree_predicted_values_factored <- factor(pruned_tree_predicted_values, levels = levels(df_dec_tree_train$NObeyesdad))
+
+# Create the confusion matrix to compare the unpruned and pruned data 
+
+pruned_data_confusion_matrix <- confusionMatrix(pruned_tree_predicted_values_factored, actual_values_factored_dec_tree)
+
+# Calculate F1 score 
+pruned_dec_tree_precision <- pruned_data_confusion_matrix$byClass[, "Precision"]
+pruned_dec_tree_sensitivity <- pruned_data_confusion_matrix$byClass[, "Sensitivity"]
+
+# Compute F1-score per class
+pruned_dec_tree_f1_score <- 2 * (pruned_dec_tree_precision * pruned_dec_tree_sensitivity) / (pruned_dec_tree_precision + pruned_dec_tree_sensitivity)
+
+# Compute Macro-averaged F1-score
+pruned_dec_tree_macro_f1 <- mean(pruned_dec_tree_f1_score, na.rm = TRUE)
+
+# Determine the accuracy
+pruned_dec_tree_accuracy <- pruned_data_confusion_matrix$overall["Accuracy"]
+
+# Plot both the full and pruned tree to have a better visual comparison
+par(mfrow = c(1,2))
+rpart.plot(decision_tree, main = "Full Decision Tree")
+rpart.plot(pruned_tree, main = "Pruned Decision Tree")
+
+
+```
+
+This function plots a graph that shows the relationship between the complexity parameter `(cp)` and the cross - validated error of the model, which is the relative error that indicates how well the model generalizes on unseen data. This plot will help us to identify the point at which increasing the tree complexity won´t reduce the prediction error. As we can observe in the plot, the **minimum cross-validation error happens at cp = `r optimal_cp_value`**, which corresponds to the most complex tree in out pruning path.
+
+Then, when we have re-evaluated the pruned tree by using the testing data set and compared it´s performance with the original, unpruned tree, the results that we have obtain are:
+
+-   An **accuracy** of `r round(pruned_dec_tree_accuracy * 100, 2)`%
+
+-   An **Macro F1-score** of `r pruned_dec_tree_macro_f1`.
+
+-   High **sensitivity** and **specificity** across all obesity classes that is similar to the one achieved in the full model.
+
+This means that **pruning didn´t harm or improved the accuracy** but it confirms that the full model already does a good generalization of the data, and it wasn´t overfitting.
+
+When we have compared the full and pruned trees, we can observe that the structure of both is almost identical, as no meaningful branches were removed. This reinforces the fact that **the original tree was already well-optimized** and the pruning step was useful as a validation step that confirms it.
+
+### Tuning the maximum depth of the tree
+
+In this case, we are going to experiment with the maximum depth of the tree, which will allow us to control the complexity of the tree, trying to avoid it from overfitting.
+
+```{r PrunedTreeMaxDepth, echo = TRUE}
+
+# Load libraries
+library(rpart)
+library(caret)
+
+# We will create a tree specifying the max depth to be 4
+decision_tree_depth_4 <- rpart(
+  formula = NObeyesdad ~ ., 
+  data = df_dec_tree_train, 
+  method = "class",
+  control = rpart.control(maxdepth = 4)  # Specify the maximum depth
+)
+
+# Extract predictors (features) from the test set
+validation_features <- df_dec_tree_test[, setdiff(names(df_dec_tree_test), "NObeyesdad")]
+
+# Extract and format the actual labels
+actual_values_factored <- factor(df_dec_tree_test$NObeyesdad, levels = levels(df_dec_tree_train$NObeyesdad))
+
+
+# Evaluate the tree with that depth
+predicted_values_depth_4 <- predict(decision_tree_depth_4, validation_features, type = "class")
+
+predicted_values_depth_4_factored <- factor(predicted_values_depth_4, levels = levels(df_dec_tree_test$NObeyesdad))
+
+# Create the confusion matrix to compare this values with the original values
+confusion_matrix_depth_4 <- confusionMatrix(predicted_values_depth_4_factored, actual_values_factored)
+
+# Calculate F1 score 
+dec_tree_precision_depth_4 <- confusion_matrix_depth_4 $byClass[, "Precision"]
+dec_tree_sensitivity_depth_4 <- confusion_matrix_depth_4 $byClass[, "Sensitivity"]
+
+# Compute F1-score per class
+dec_tree_f1_score_depth_4 <- 2 * (dec_tree_precision_depth_4 * dec_tree_sensitivity_depth_4) / (dec_tree_precision_depth_4 + dec_tree_sensitivity_depth_4)
+
+# Compute Macro-averaged F1-score
+dec_tree_macro_f1_depth_4 <- mean(dec_tree_f1_score_depth_4, na.rm = TRUE)
+
+# Determine the accuracy
+dec_tree_accuracy_depth_4 <- confusion_matrix_depth_4 $overall["Accuracy"]
+
+
+```
+
+Setting the limitation of the maximum depth of the decision tree to 4 help us to reduce the complexity of the model and the risk of overfitting, while the resulted model is still interpretable and has a strong performance on classification.
+
+The results that we have obtained are:
+
+- An accuracy of r round(dec_tree_accuracy_depth_4 * 100, 2)%
+- A macro-averaged F1-score of r round(dec_tree_macro_f1_depth_4, 4)
+
+Which are similar and comparable to those of the full and pruned trees, indicating that this didn´t significantly improve the predictive performande of the model. 
+
+
+### C5.0 Decision Tree with Boosting
+
+Boosting is an ensemble learning technique that aims to improve the accuracy of a predictive model by combining the strengths of multiple weak learners. In the context of decision trees, boosting involves creating a series of decision trees, where each subsequent tree attempts to correct the errors made by the previous ones. The goal is to convert a collection of weak learners (trees that are only slightly better than random guessing) into a strong learner (a highly accurate model).
+
+```{r C5.0_decision_tree, echo = TRUE}
+
+# Load the C5.0 algorithm from the C50 package to train our decision tree model.
+
+library(C50)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Check that our target variable is a factor, as it is what the "C5.0" function expects.
+
+df_dec_tree_train$NObeyesdad <- as.factor(df_dec_tree_train$NObeyesdad)
+df_dec_tree_test$NObeyesdad <- as.factor(df_dec_tree_test$NObeyesdad )
+
+# Train a decision tree using the C5.0 algorithm on all features except for the training variables.
+
+training_features_C5 <-df_dec_tree_train[ , names(df_dec_tree_train) != "NObeyesdad"]
+
+# Apply C5 boosting model with 20 trials to improve the predictive performance
+C5_boosted_model <- C5.0(training_features_C5, df_dec_tree_train$NObeyesdad, trials = 20, rules = F)
+
+print(C5_boosted_model)
+
+```
+
+### Evaluation of Boosted C5.0 Decision Tree Model
+
+```{r C5_Boosted_Tree_Evaluation, echo = TRUE, warning=FALSE}
+
+# Use the testing features, make a prediction with out boosted model
+C5_boosted_predictions <- predict(C5_boosted_model, testing_features)
+
+# Generate the confusion matrix to compare the values
+C5_boosted_confusion_matrix <- confusionMatrix(C5_boosted_predictions,df_dec_tree_test$NObeyesdad )
+
+# Print the results of the confusion matrix
+print(C5_boosted_confusion_matrix)
+
+# Calculate F1 score 
+C5_dec_tree_precision <- C5_boosted_confusion_matrix$byClass[, "Precision"]
+C5_dec_tree_sensitivity <- C5_boosted_confusion_matrix$byClass[, "Sensitivity"]
+
+# Calculate accuracy
+C5_boosted_model_accuracy <- C5_boosted_confusion_matrix$overall["Accuracy"]
+
+# Compute F1-score per class
+C5_dec_tree_f1_score <- 2 * (C5_dec_tree_precision * C5_dec_tree_sensitivity) / (C5_dec_tree_precision + C5_dec_tree_sensitivity)
+
+# Compute Macro-averaged F1-score
+C5_dec_tree_macro_f1 <- mean(C5_dec_tree_f1_score, na.rm = TRUE)
+
+```
+
+We have created a new boosted decision tree model using the `(C5.0 Algorithm)` and applying 20 boosting trials in order to improve the accuracy of the classification of the 7 categories in our target variable. After this, we have evaluated this model with the testing dataset, and we have achieved:
+
+-   An **overall accuracy** of `r round(C5_boosted_model_accuracy * 100, 2)`%
+
+-   A **sensitivity and specificity** that was consistently high across the different categories, with the majority of classes achieving **an accuracy above 98%**.
+
+-   We can observe that the `Obesity_Type_II`, `Overweight_Level_II`, and `Obesity_Type_I` showed **almost perfect sensitivity**, demonstrating that the model correctly identified all the instances from these classes.
+
+-   A **macro averaged F1-score** of `r C5_dec_tree_macro_f1`.
+
+Compared to the model that we created using `(rpart)`, the `(C5.0)` boosted model demonstrated a **slightly higher performance**, more specifically it handled better the minority and different obesity levels. This improvement has been achieved due to the boosting mechanism which has demonstrated that it reduces bias and variance by iteratively correcting misclassified instances from prior trees.
+
+From these results we can determine that our C5.0 boosted model provided a **robust and reliable multi-class classifier**, demonstrating that it has a superior performance and strong generalization to unseen data.
+
+### Bagged Decision Tree Ensemble using Bootstrap Sampling
+
+In order to increase the robustness of the decision tree classifier, I am going to create the **bagged subsets**, specifically 10 training subsets from the original training data (`df_dec_tree_train`) and train an individual decision tree on each subset.
+
+```{r decision_tree_bagging, echo = TRUE, warning=FALSE}
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Number of models and sample size
+tree_n_partitions <- 10
+tree_sample_size <- round(0.7 * nrow(df_dec_tree_train))
+
+# Create a list to hold the different bootstraped partitions
+tree_partitions <- list()
+
+# Generate the 10 different partitions with replacement from the training data
+for (i in 1:tree_n_partitions) {
+  
+  # Sample the row indices with replacement
+  tree_sampled_indices <- sample(1:nrow(df_dec_tree_train), 
+                            size = tree_sample_size, 
+                            replace = TRUE)
+  
+  # Create the subset
+  tree_partitions[[i]] <-df_dec_tree_train[tree_sampled_indices, ]
+}
+
+# Inspect the first rows of the partition
+head(tree_partitions[[1]],5)
+
+
+```
+
+We have checked that the partitions had been correctly created and that each contains a bootstrap sample of 70% of the original training subset, generated with replacement. This is going to ensure that our decision tree model is going to be able to capture different patterns of the data and reduce variance.
+
+### Training Bagged Decision Trees on Bootstrap Samples
+
+In this part of the analysis, we are going to train the decision tree models on each bagging subset, including all the predictors.
+
+```{r train_decision_tree_bagged,echo=TRUE,warning=FALSE}
+
+# Load the rpart package
+library(rpart)
+
+# Create list to store the trained models
+bagged_decision_trees <- list()
+
+# Fit decision tree model on each bootstrapped sample
+for (i in 1:tree_n_partitions){
+  
+  # Decision tree for full model
+  bagged_decision_tree <- rpart(NObeyesdad ~ .,data = tree_partitions[[i]], method = "class", 
+  parms = list(split = "gini"))
+  
+  # Store the model
+  bagged_decision_trees[[i]] <- bagged_decision_tree
+}
+
+```
+
+By using all the available features in each model we make sure that all of the potentially informative variables are included.
+
+### Homogeneous Ensemble Predictions from Bagged Decision Trees
+
+In this part of the analysis, we use our trained decision trees model on each of the 10 bootstrap training subsets that we have previously created, to create predictions of the target variable `NObeyesdad`using the test data. The predictions from these models are stored in a matrix where each column represents the respective mode and we used a **majority voting** across the 10 trees to form a **homogeneous ensemble classifier**
+
+**This will be the basis of our homogeneous ensemble**, that combines different weaker models to achieve a more robust and generalized final prediction. Then we evaluated the ensemble using the test data, to determine the confusion matrix and standard classification metrics.
+
+```{r evaluation_homogeneous_decision_tree_ensemble, echo = TRUE, warning=FALSE}
+
+# Predict using all the 10 bagged models
+dec_tree_hom_ensemble_pred_matrix <- sapply(bagged_decision_trees, function(model) {
+  predict(model, df_dec_tree_test, type = "class")
+})
+
+# Perform majority voting on each row of the matrix
+bagged_majority_vote_prediction <- apply(dec_tree_hom_ensemble_pred_matrix, 1, function(row) {
+  bagged_table <- table(row)
+  names(which.max(bagged_table))
+})
+
+# Convert the predictions into factors
+dec_tree_hom_ensemble_predictions <- factor (bagged_majority_vote_prediction, levels = levels(df_dec_tree_test$NObeyesdad))
+ dec_tree_actual_predictions<- factor(df_dec_tree_test$NObeyesdad)
+
+# Create the confusion matrix to compare the results
+library(caret)
+dec_tree_hom_ensemble_pred_confusion_matrix <- confusionMatrix(dec_tree_hom_ensemble_predictions,  dec_tree_actual_predictions)
+
+# Extract the metrics
+dec_tree_hom_ensemble_precision <- dec_tree_hom_ensemble_pred_confusion_matrix$byClass[, "Precision"]
+dec_tree_hom_ensemble_sensitivity <- dec_tree_hom_ensemble_pred_confusion_matrix$byClass[, "Sensitivity"]
+
+# Calculate f1 score
+dec_tree_hom_ensemble_f1<- 2 * (dec_tree_hom_ensemble_precision * dec_tree_hom_ensemble_sensitivity) / (dec_tree_hom_ensemble_precision + dec_tree_hom_ensemble_sensitivity)
+
+# Calculate macro averaged f1 score and accuracy
+dec_tree_hom_ensemble_macro_f1 <- mean(dec_tree_hom_ensemble_f1, na.rm = TRUE)
+ dec_tree_hom_ensemble_accuracy<- dec_tree_hom_ensemble_pred_confusion_matrix$overall["Accuracy"]
+
+```
+
+The results that have been obtained, demonstrate that bagging improved the robustness of the model, as we achieved:
+
+-   A **Macro-averaged F1-score**: `r round(dec_tree_hom_ensemble_macro_f1, 4)`
+-   An **Accuracy**: `r round( dec_tree_hom_ensemble_accuracy * 100, 2)`%
+
+These results confirm that ensemble learning via bagging helped stabilize predictions across classes and reduced the impact of overfitting, especially when compared to a single decision tree. The method is particularly effective for our moderately sized dataset, offering a good balance between interpretability and predictive power.
+
+### Evaluate Performance of Bagged Decision Tree using 10-Fold Cross-Validation
+
+In order to asses the robustness of the bagged decision tree ensemble, I have applied a **10-fold cross-validation** procedure by using the `caret` package. I splitted the data into training and validation subsets on each fold and, from the training subset I generated **10 bootstrap samples** and I trained each individual decision tree model on each of them. Then, I use **majority voting** to aggregate the predictions on the validation fold and then, calcualted the **macro-averaged F1-score** to evaluate the performance.
+
+```{r k_fold_log_reg_dec_tree, echo = TRUE, warning = FALSE}
+
+# Load libraries
+library(rpart)
+library(caret)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Determine the folds using the caret package and store then on a list
+k_folds_tree <- createFolds(df_dec_tree_train$NObeyesdad, k = 10)
+
+# Initialize empty lists to store the results
+dec_tree_macro_f1_k <- list()
+dec_tree_accuracy_k <- list()
+
+# Determine the macro-f1 and accuracy results on each fold using the fold´s indices and the training set
+for (fold in seq_along(k_folds_tree)) {
+  
+  # Determine the validation index
+  validation_index <- k_folds_tree[[fold]]
+  
+  # Determine the validation and training data using using the row indices of the current fold
+  validation_data <- df_dec_tree_train[validation_index,]
+  training_data <- df_dec_tree_train[-validation_index, ]
+  
+  # Create a 10 bootstrapped samples and train the decision trees on them
+  n_trees <- 10
+  sample_size_tree <- round(0.7 * nrow(training_data))
+  decision_tree_models <- list()
+  
+  # For each tree we will use a bootstrap sample, fit a decision tree and store the model
+  for (i in 1:n_trees) {
+    # Determine a bootstrap sample from the training data
+    bootstrap_index<- sample(1:nrow(training_data), sample_size_tree, replace = TRUE)
+    bootstrap_sample <- training_data[bootstrap_index, ]
+    # Fit a decision tree using the Gini index
+    bootstrap_model <- rpart(NObeyesdad ~ ., data = bootstrap_sample, method = "class", parms = list(split = "gini"))
+    #Store the model
+    decision_tree_models[[i]] <- bootstrap_model
+  }
+  
+  # Predict  for the validation data, using each model
+  prediction_matrix <- sapply(decision_tree_models, function(model) {
+    predict(model, validation_data, type = "class")
+  })
+  
+  # Determine majority vote aggragation by counting how many models predicted each class for each row, and get the most frequent class
+  majority_vote_tree <- apply(prediction_matrix, 1, function(row) {
+    votes <- table(row)
+    names(which.max(votes))
+  })
+  
+  # Convert the predictions and actual lavels into factors with the same class legels
+  predicted_labels_tree <- factor(majority_vote_tree, levels = levels(df_log_train$NObeyesdad))
+  actual_labels_tree <- factor(validation_data$NObeyesdad, levels = levels(df_log_train$NObeyesdad))
+  
+  # Create the confusion matrix to compare predicted and actual labels
+  confusion_matrix_tree <- confusionMatrix(predicted_labels_tree, actual_labels_tree)
+  
+  #Calc F1 score by getting precision and recall on each class
+  precision_logistic_tree <- confusion_matrix_tree$byClass[,"Precision"]
+  sensitivity_logistic_tree <- confusion_matrix_tree$byClass[,"Sensitivity"]
+
+  # Calculate and store F1 score for each class
+  f1_class_tree <-  2 * (precision_logistic_tree  * sensitivity_logistic_tree)  / (precision_logistic_tree +sensitivity_logistic_tree)
+  
+  # Calculate the Macro average F1 score of each model using the average
+  macro_f1 <- mean(f1_class_tree, na.rm = TRUE)
+  
+  # Calculate the Accuracy
+  accuracy <- confusion_matrix_tree$overall["Accuracy"]
+  
+  # Store the results
+  dec_tree_macro_f1_k[[fold]] <- macro_f1
+  dec_tree_accuracy_k[[fold]] <- accuracy
+
+}
+
+# Calculate averages
+dec_tree_average_macro_f1_k <- mean(unlist(dec_tree_macro_f1_k))
+dec_tree_average_accuracy_k <- mean(unlist(dec_tree_accuracy_k))
+
+
+
+
+```
+
+The 10-fold cross-validation of the bagged decision tree ensemble resulted in a robust performance estimate. By repeatedly training on different bootstrapped samples and aggregating predictions through majority voting, the model avoided overfitting and ensured stable predictions.
+
+The final **macro-averaged F1-score** across all folds was: `round(dec_tree_average_macro_f1_k, 4)` and the final accuracy was: `r dec_tree_average_accuracy_k`.
+
+## Neural Network
+
+As mentioned in (@lantz2019machine) _"An artificial neural network (ANN) models the relationship between a set of input signals and an output signal using a model derived from our understanding of how a biological brain responds to stimuli from sensory inputs"_.
+
+So, neural networks works as an interconnected group of layers that had different nodes that are processing information depending on an activation function and on the specific weights that receive. They are particularly well-suited for modeling complex relationships in data and have a demonstrated strong performance in classification tasks.
+
+### Baseline Neural Network Model (Single Hidden Layer)
+
+In this part of the analysis we are going to implement and evaluate a neural network classifier using the preprocessed data that we have previously created and, our main goal is to **determine the baseline performance for a single neural network model.**
+
+To achieve this, we are going to train the model using the `nnet` package, and construct a simple feedforward network that has one hidden layer. This implimentation is based on the documentation and information provided from the (@nnet_package_help), (@nnet_reference_manual) and (@nnetpackage).
+
+```{r train_nn, echo = TRUE, warning=FALSE}
+
+# Load the required package
+library(nnet)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Make sure that the target variable is a factor
+df_nn_train$NObeyesdad <- as.factor(df_nn_train$NObeyesdad)
+
+# Create the model
+nn_model <- nnet(NObeyesdad ~ ., 
+                 data = df_nn_train, 
+                 size = 5 # It determines the number of nodes of the layer
+                 )
+
+
+```
+
+Here we can observe the result of training a feedforward neural network, with one hidden layer and containing 5 nodes using the `nnet` package. What we can understand from this data is that:
+
+-   The model has a total of 167 weight, that are the trainable parameters.
+-   The initial and final value is referring to the value of the loos function, which goes from 3212.06 to 45.07, demonstrating that the network successfully minimized the error.
+-   The model stopped after 100 iteration.
+
+### Evaluate Baseline Neural Network Performance
+
+Now we are going to generate predictions on the test dataset from a trained neural network model (nn_model) and evaluate how well it performs. We use the type = "raw" argument in the `predict ()` function to get a matrix of predicted class probabilities for each observation. The information used to perform this part of the analysis has been obtained from (@example_nnet).
+
+Then, for each observation that is stored on each row of the matrix, we have selected the class with the highest probability as the final predicted label, and then we have compare these predicted labels to the actual labels in the testing dataset using a confusion matrix.
+
+```{r predict_nn, echo = TRUE, warning=FALSE}
+# Load Library
+library(caret)
+
+# Predict class probabilities
+nn_predictions <- predict(nn_model, df_nn_test, type = "raw")
+
+# Determine the class prediction with the highest probability
+nn_predictions <- apply(nn_predictions, 1, function (x) colnames(nn_predictions)[which.max(x)])
+
+# Ensure that the predictions are factor to compare in the confusion matrix
+nn_predictions <- factor(nn_predictions, levels = levels(df_nn_test$NObeyesdad))
+
+# Evaluate the performance of the model
+confusion_matrix_nn <- confusionMatrix(nn_predictions, df_nn_test$NObeyesdad)
+confusion_matrix_nn
+
+# Determine parameters
+nn_precision <- confusion_matrix_nn$byClass[, "Precision"]
+nn_sensitivity <- confusion_matrix_nn$byClass[, "Sensitivity"]
+
+# Compute F1-score per class
+nn_f1_score <- 2 * (nn_precision * nn_sensitivity) / (nn_precision + nn_sensitivity)
+
+# Compute Macro-averaged F1-score
+nn_macro_f1 <- mean(nn_f1_score , na.rm = TRUE)
+
+# Determine the overall accuracy of the nn model
+nn_model_accuracy <- confusion_matrix_nn$overall["Accuracy"]
+```
+
+From what we can observe in the results of the confusion matrix, the neural network has achieved:
+
+-   An **accuracy of `nn_model_accuracy`%**. demonstrating that the model is achieving a great performance on the test set.
+
+-   A **sensitivity** of 1.00, which is a perfect level of sensitivity for the classes *Insufficient_Weight* and *Obesity_Type_II*, which indicates that it correclty identified all the true cases of those categories. Nevertheless, there were other classes such as *Normal_Weight* and *Overweight_Level_I* that had a lower sensitivity, 0.86 and 0.91 respectively, but still achieve good performance.
+
+-   A high **balanced accuracy** value, across all classes, which demonstrates that the model can handle class imbalance reasonably well. From this, I can conclude that even with a single hidden layer with 5 nodes, the neural network performs effectively at classifying the obesity categories in this dataset.
+
+-   A **macro averaged F1-score** of `r nn_macro_f1`.
+
+In future iterations, I could experiment with increasing the number of hidden nodes or adding regularization to see if the performance improves even more.
+
+### Neural Networks Hyperparameter Tuning
+
+As mentioned in (@lantz2019machine), _"as networks with more complex topologies are capable of learning more difficult concepts" we can tune their hyperparameters to improve the performance of the model._
+
+Some of the hyperparameters that we can explore in the `nnet` package are:
+
+-   **`size`**, which is the number of hidden nodes in the singel layer. We have used 5.
+-   **`decay`**, which is a parameter that controls the weight decay, that encourages the networks to reduce the complexity and help generalize better to unseen data. We have used the default value which is 0.
+-   **\`maxit**, which is the maximum number of iterations. We have used the default value which is 100.
+
+```{r train_evaluate_hypertuned_nn, echo = TRUE, warning=FALSE,message=FALSE}
+
+# Load the required package
+library(nnet)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Make sure that the target variable is a factor
+df_nn_train$NObeyesdad <- as.factor(df_nn_train$NObeyesdad)
+
+# Create the model
+nn_tuned_model <- nnet(NObeyesdad ~ ., 
+                 data = df_nn_train, 
+                 size = 10, 
+                 decay = 5e-4,
+                 maxit = 200 
+                 )
+
+# Load Library
+library(caret)
+
+# Predict class probabilities
+nn_tuned_predictions <- predict(nn_tuned_model, df_nn_test, type = "raw")
+
+# Determine the class prediction with the highest probability
+nn_tuned_predictions <- apply(nn_tuned_predictions, 1, function (x) colnames(nn_tuned_predictions)[which.max(x)])
+
+# Ensure that the predictions are factor to compare in the confusion matrix
+nn_tuned_predictions <- factor(nn_tuned_predictions, levels = levels(df_nn_test$NObeyesdad))
+
+# Evaluate the performance of the model
+confusion_matrix_tuned_nn <- confusionMatrix(nn_tuned_predictions, df_nn_test$NObeyesdad)
+confusion_matrix_tuned_nn
+
+# Determine the overall accuracy of the nn model
+nn_tuned_model_accuracy <- confusion_matrix_tuned_nn$overall["Accuracy"]
+
+# Calculate F1 score 
+nn_tuned_precision <- confusion_matrix_tuned_nn$byClass[, "Precision"]
+nn_tuned_sensitivity <- confusion_matrix_tuned_nn$byClass[, "Sensitivity"]
+
+# Compute F1-score per class
+nn_tuned_f1_score <- 2 * (nn_tuned_precision * nn_tuned_sensitivity) / (nn_tuned_precision + nn_tuned_sensitivity)
+
+# Compute Macro-averaged F1-score
+nn_tuned_macro_f1 <- mean(nn_tuned_f1_score , na.rm = TRUE)
+
+
+```
+
+In this case we have applied basic hyperparameter tuning based on guidance from class material and documentation, we used:
+
+-   size = 10, to give the network more capacity to be able to identify complex patterns in the data, as the higher number of nodes leads to better learning.
+-   decay = 5e-4, as is used in the documentation and it prevents overfitting.
+-   maxit = 200, to allow the training algorithm more time to reach the optimum value.
+
+From what we can observe in the results of the confusion matrix of our tuned neural network model achieved:
+
+-   An **accuracy of `nn_tuned_model_accuracy`%**. demonstrating that the model is achieving a slightly better performance than the baseline model\
+    accuracy of `nn_model_accuracy`%.
+
+-   A **sensitivity** of 1.00, which is a perfect level of sensitivity for the classes *Insufficient_Weight* and *Obesity_Type_III*, which indicates that it correctly identified all the true cases of those categories, and a nearly perfect sensitivity of *Obesity_Type_II*.
+
+-   A high **balanced accuracy** values, similar to the ones that we have previously achieved, across all classes, which demonstrates that the model can handle class imbalance reasonably well. Being the smaller value only 92.2% for *Normal_Weight*
+
+These results ensures that tuning the parameters `size`, `decay` and `maxit` can improve the performance of our neural network models, demonstrating that it could improve even more with more complex techniques as ensembles.
+
+### Bagged Neural Network Ensemble Using Bootstrap Sampling
+
+In order to imrpve the generalization ability of our neural network classifier, we are going to apply bagging and generate 10 bootstrapped training subsets from our original training data (`df_nn_train`) and each subset will be used to train a separate neural network nodel with the `nnet`package. Finally, we will use **majority voting** to determine this homogeneous ensemble prediction.
+
+```{r nn_bagging, echo = TRUE, warning=FALSE}
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Number of models and sample size
+nn_n_partitions <- 10
+nn_sample_size <- round(0.7 * nrow(df_nn_train))
+
+# Create a list to hold the different bootstraped partitions
+nn_partitions <- list()
+
+# Generate the 10 different partitions with replacement from the training data
+for (i in 1:tree_n_partitions) {
+  
+  # Sample the row indices with replacement
+  nn_sampled_indices <- sample(1:nrow(df_nn_train), 
+                            size = nn_sample_size, 
+                            replace = TRUE)
+  
+  # Create the subset
+  nn_partitions[[i]] <-df_nn_train[nn_sampled_indices, ]
+}
+
+# Inspect the first rows of the partition
+head(nn_partitions[[1]],5)
+
+
+```
+
+We have checked that the partitions had been correctly created and that each contains a bootstrap sample of 70% of the original training subset, generated with replacement.
+
+### Training Bagged Neural Networks on Bootstrap Samples
+
+In this part of the analysis, we are going to train each neural network with one hidden layer using the same parameters as our tuned model ( size = 10, decay = 5e-4, maxit = 200)
+
+```{r train_nn_bagged,echo=TRUE,warning=FALSE}
+
+# Load the rpart package
+library(nnet)
+
+# Create list to store the trained models
+bagged_nn_models <- list()
+
+# Train neural nets on each bootstrap subset
+for (i in 1:nn_n_partitions) {
+  model <- nnet(NObeyesdad ~ ., 
+                data = nn_partitions[[i]], 
+                size = 10, 
+                decay = 5e-4, 
+                maxit = 200 
+                )
+  
+  # Store the model
+  bagged_nn_models[[i]] <- model
+}
+
+```
+
+By using all the available features in each model we make sure that all of the potentially informative variables are included.
+
+### Make predictions from bagged neural networks - Homogeneous ensemble
+
+In this part of the analysis, we use our neural networks model on each of the 10 bootstrap training subsets that we have previously created, to create predictions of the target variable `NObeyesdad`using the test data. The predictions from these models are stored in a matrix where each column represents the respective mode and we used a **majority voting** across the 10 neural network models to form a **homogeneous ensemble classifier**
+
+**This will be the basis of our homogeneous ensemble**, that combines different weaker models to achieve a more robust and generalized final prediction. Then we evaluated the ensemble using the test data, to determine the confusion matrix and standard classification metrics.
+
+```{r evaluation_homogeneous_ensemble_nn, echo = TRUE, warning=FALSE}
+
+# Predict using all the 10 bagged models
+nn_hom_ensemble_prediction_matrix <- sapply(bagged_nn_models, function(model) {
+  nn_probabilities <- predict(model, df_nn_test, type = "raw")
+  apply(nn_probabilities, 1, function(x) colnames(nn_probabilities)[which.max(x)])
+
+})
+
+# Perform majority voting on each row of the matrix
+nn_hom_ensemble_majority_vote_prediction <- apply(nn_hom_ensemble_prediction_matrix, 1, function(row) {
+  nn_votes <- table(row)
+  names(which.max(nn_votes))
+})
+
+# Convert the predictions into factors
+nn_hom_ensemble_predictions <- factor (nn_hom_ensemble_majority_vote_prediction, levels = levels(df_nn_test$NObeyesdad))
+nn_hom_ensemble_actual_predictions <- factor(df_nn_test$NObeyesdad)
+
+# Create the confusion matrix to compare the results
+library(caret)
+nn_hom_ensemble_confusion_matrix <- confusionMatrix(nn_hom_ensemble_predictions, nn_hom_ensemble_actual_predictions)
+
+# Extract the metrics
+nn_hom_ensemble_precision <- nn_hom_ensemble_confusion_matrix$byClass[, "Precision"]
+nn_hom_ensemble_sensitivity  <- nn_hom_ensemble_confusion_matrix$byClass[, "Sensitivity"]
+
+# Calculate f1 score
+nn_hom_ensemble_f1 <- 2 * (nn_hom_ensemble_precision * nn_hom_ensemble_sensitivity) / (nn_hom_ensemble_precision  + nn_hom_ensemble_sensitivity)
+
+# Calculate macro averaged f1 score and accuracy
+nn_hom_ensemble_macro_av_f1 <- mean(nn_hom_ensemble_f1, na.rm = TRUE)
+ nn_hom_ensemble_accuracy<- nn_hom_ensemble_confusion_matrix$overall["Accuracy"]
+
+```
+
+The results that have been obtained, demonstrate that the bagged neural network ensemble has improved the robustness of the model by reducing the variance that was associated with the individual models , as we achieved:
+
+-   A **Macro-averaged F1-score**: `r round(nn_hom_ensemble_macro_av_f1, 4)`
+-   An **Accuracy**: `r round( nn_hom_ensemble_accuracy * 100, 2)`%
+
+These results confirm that ensemble learning via bagging helped stabilize predictions across classes and reduced the impact of overfitting, especially when compared to a single neural network.
+
+### Evaluate Performance of Bagged Neural Network using 10-Fold Cross-Validation
+
+In order to asses the robustness of the bagged neural network ensemble, I have applied a **10-fold cross-validation** procedure by using the `caret` package. I splitted the data into training and validation subsets on each fold and, from the training subset I generated **10 bootstrap samples** and I trained each individual neural network model on each of them. Then, I use **majority voting** to aggregate the predictions on the validation fold and then, calcualted the **macro-averaged F1-score** to evaluate the performance.
+
+```{r k_fold_bagged_nn, echo = TRUE, warning = FALSE}
+
+# Load libraries
+library(rpart)
+library(caret)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Determine the folds using the caret package and store then on a list
+k_folds_nn <- createFolds(df_nn_train$NObeyesdad, k = 10)
+
+# Initialize lists to store the results
+nn_macro_f1_list_k <- list()
+nn_accuracy_list_k <- list()
+
+# Determine the macro-f1 and accuracy results on each fold using the fold´s indices and the training set
+for (fold in seq_along(k_folds_nn)) {
+  
+  # Determine the validation index
+    validation_index <- k_folds_nn[[fold]]
+
+  # Determine the validation and training data using using the row indices of the current fold
+  validation_data_nn <- df_nn_train[validation_index,]
+  training_data_nn <- df_nn_train[-validation_index, ]
+  
+  # Create a 10 bootstrapped samples and train the decision trees on them
+  n_trees_nn <- 10
+  sample_size_nn <- round(0.7 * nrow(training_data_nn))
+  nn_models <- list()
+  
+  # For each tree we will use a bootstrap sample, fit a decision tree and store the model
+  for (i in 1:n_trees_nn) {
+    
+    # Determine a bootstrap sample from the training data
+    nn_bootstrap_index<- sample(1:nrow(training_data_nn), sample_size_nn, replace = TRUE)
+    nn_bootstrap_sample <- training_data_nn[nn_bootstrap_index, ]
+    
+    # Fit a neural network 
+    nn_bootstrap_model <- nnet(NObeyesdad ~ ., 
+                  data = nn_bootstrap_sample,
+                  size = 10,
+                  decay = 5e-4,
+                  maxit = 200)
+    
+    #Store the model
+    nn_models[[i]] <- nn_bootstrap_model
+  }
+  
+  # Predict  for the validation data, using each model
+  nn_prediction_matrix <- sapply(nn_models, function(model) {
+    nn_bag_model_probability <- predict(model, validation_data_nn, type = "raw")
+    apply(nn_bag_model_probability, 1, function(x) colnames(nn_bag_model_probability)[which.max(x)])
+  })
+  
+  # Determine majority vote aggragation by counting how many models predicted each class for each row, and get the most frequent class
+  majority_vote_nn <- apply(nn_prediction_matrix, 1, function(row) {
+    nn_votes_cv <- table(row)
+    names(which.max(nn_votes_cv))
+  })
+  
+  # Convert the predictions and actual lavels into factors with the same class legels
+  predicted_labels_nn_cv <- factor(majority_vote_nn, levels = levels(df_nn_train$NObeyesdad))
+  actual_labels_nn_cv <- factor(validation_data_nn$NObeyesdad, levels = levels(df_nn_train$NObeyesdad))
+  
+  # Create the confusion matrix to compare predicted and actual labels
+  confusion_matrix_nn_cv <- confusionMatrix(predicted_labels_nn_cv, actual_labels_nn_cv)
+  
+  #Calc F1 score by getting precision and recall on each class
+  precision_nn_cv <- confusion_matrix_nn_cv$byClass[,"Precision"]
+  sensitivity_nn_cv <- confusion_matrix_nn_cv$byClass[,"Sensitivity"]
+
+  # Calculate and store F1 score for each class
+  f1_class_nn_cv <-  2 * (precision_nn_cv   * sensitivity_nn_cv)  / (precision_nn_cv  + sensitivity_nn_cv)
+  
+  # Calculate the Macro average F1 score of each model using the average
+    macro_f1_nn_cv <- mean(f1_class_nn_cv, na.rm = TRUE)
+
+  # Calculate the accuracy 
+  accuracy_nn_cv <- confusion_matrix_nn_cv$overall["Accuracy"]
+  
+  # Store results
+  nn_macro_f1_list_k[[fold]] <- macro_f1
+  nn_accuracy_list_k[[fold]] <- accuracy
+  
+}
+
+# Determine the overall final average across all 10 folds
+nn_average_macro_f1_k <- mean(unlist( nn_macro_f1_list_k))
+nn_average_accuracy_k <- mean(unlist(nn_accuracy_list_k))
+
+```
+
+The 10-fold cross-validation of the bagged neural network ensemble resulted in a robust performance estimate. By repeatedly training on different bootstrapped samples and aggregating predictions through majority voting, the model avoided overfitting and ensured stable predictions.
+
+The final **macro-averaged F1-score** across all folds was: `round(nn_average_macro_f1_k, 4)` and a **accuracy** of `r round(nn_average_accuracy_k,4)`
+
+## Heterogeneous Ensemble
+
+As mentioned in (@lantz2019machine), _"In supervised machine learning, a model is typically trained on labeled data with the goal of generalizing its predictive ability to unseen examples. However, individual models often suffer from limitations._
+
+_Ensemble learning addresses this challenge by combining multiple models to form a single, more robust predictive model. The fundamental idea is that by aggregating the outputs of several models, each of which may capture different aspects of the data, the ensemble will produce more accurate and stable predictions than any single model could achieve alone."_
+
+This is why we are going to construct an heterogeneous ensemble inside of a funciton by **combining predictions from the three homogeneous models created earlier: logistic regression model, decision tree and neral network.**
+
+This combination uses **majority voting** where each model in the ensemble predicts the class label for a given input, and the class label that receives the majority of votes is selected as the final prediction. The performance of this ensemble was evaluated using the F1 score, which provides a balanced measure of precision and recall.
+
+```{r heterogenous_ensemble,echo=TRUE,warning=FALSE}
+
+heterogeneous_ensemble <- function(log_predictions, tree_predictions, nn_predictions, actual_labels) {
+
+  # Load the required library
+  target_variable_levels <- levels(actual_labels)
+  
+  # Ensure that the predicted labels are factors with the same levels in the target variable
+  log_preds <- factor(log_predictions, levels = target_variable_levels)
+  tree_preds <- factor(tree_predictions, levels = target_variable_levels)
+  nn_preds <- factor(nn_predictions, levels = target_variable_levels)
+  
+  # Combine all of the predictions of the model into a matrix
+  heter_ensemble_pred_matrix <- cbind(
+    as.character(log_preds),
+    as.character(tree_preds),
+    as.character(nn_preds)
+  )
+  
+  # Perform majority voting
+  heter_ensemble_majority_vote <- apply(heter_ensemble_pred_matrix, 1,
+  function(row) {
+    row <- as.character(row) # Convert form factor to character to avoid numeric indexing
+  het_ens_vote_count <- table(row)
+  class_with_majority_vote <-names(het_ens_vote_count)[het_ens_vote_count == max(het_ens_vote_count)]
+  return(as.character(class_with_majority_vote[[1]]))
+})
+  # Convert into factor with the same levels
+  heter_ensemble_final_pred <-factor(heter_ensemble_majority_vote, levels =
+                                       target_variable_levels)
+  # Load the required library
+  library(caret)
+  
+  # Confusion matrix for ensemble
+  heter_ensemble_confusion_matrix <-
+    confusionMatrix(heter_ensemble_final_pred,actual_labels)
+  
+  # Calculate macro-averaged F1 score
+  heter_ensemble_precision <- heter_ensemble_confusion_matrix$byClass[, "Precision"]
+  heter_ensemble_sensitivity <- heter_ensemble_confusion_matrix$byClass[, "Sensitivity"]
+  
+  heter_ensemble_f1_class <- 2 * (heter_ensemble_precision * heter_ensemble_sensitivity) / (heter_ensemble_precision + heter_ensemble_sensitivity)
+  
+  heter_ensemble_macro_f1 <- mean(heter_ensemble_f1_class, na.rm = TRUE)
+heter_ensemble_accuracy <- heter_ensemble_confusion_matrix$overall["Accuracy"]
+
+ # Return the results as a list
+return(list(
+  final_predictions = heter_ensemble_final_pred,
+  confusion_matrix = heter_ensemble_confusion_matrix,
+  macro_f1 = heter_ensemble_macro_f1,
+  accuracy = heter_ensemble_accuracy
+))
+
+}
+
+# Now we are going to use the function that we have created to obtain the predictions
+
+# Ensure that the actual labels are factors with correct levels
+actual_labels <- factor(df_log_test$NObeyesdad)
+
+# Call the heterogeneous ensemble function that we have created
+heter_ensemble_results <- heterogeneous_ensemble(
+  log_predictions = log_hom_ensemble_pred,
+  tree_predictions = dec_tree_hom_ensemble_predictions,
+  nn_predictions = nn_hom_ensemble_predictions,
+  actual_labels = actual_labels
+)
+
+# Store the performance metrics in variables
+heter_ensemble_accuracy <- heter_ensemble_results$accuracy
+heter_ensemble_macro_f1<- heter_ensemble_results$macro_f1
+```
+
+The results that we have obtained demonstrate that the heterogeneous ensemble has effectively integrating diverse learning strategies, nevertheless the performance has been slightly reduced compare to other models. In this heterogeneous ensemble we achieved:
+
+-   A **Macro-averaged F1-score** of `r round(heter_ensemble_macro_f1, 4)`
+-   An **Accuracy** of `r round(heter_ensemble_accuracy * 100, 2)`%.
+
+### Stacking our heterogeneous ensemble
+
+As mentioned in (@lantz2019machine) _"stacking aims to combine diverse base models by training a meta-learner to optimally integrate their predictions"_. To do it we begin by training multiple base learners on the training data, which in this case is our heterogeneous ensemble, and once trained each base model generates predictions on the input data. These predictions are then used as features for a new model—called the meta-learner or level-1 model — which learns to predict the final output from the base predictions.
+
+_"To avoid overfitting, stacking generally requires that the meta-learner be trained on out-of-fold predictions rather than on the same data used to train the base learners. This is typically accomplished using cross-validation. The base learners are each trained on a subset of the training data and make predictions on the held-out portion. These out-of-fold predictions are then used to train the meta-learner, which ensures that the second-level model does not simply memorize the training responses."*_ (@lantz2019machine).
+
+```{r stacking_het_ensemble, echo = TRUE, warning=FALSE,message=FALSE}
+
+# Load the required packages
+library(caret)
+library(caretEnsemble)
+
+# Set seed for reproducibilityokay 
+set.seed(123)
+
+# Define trainControl for stacking with cross-validation
+train_control <- trainControl(
+  method = "cv",
+  number = 5,
+  savePredictions = "final",
+  classProbs = TRUE,
+  index = createFolds(df_log_train$NObeyesdad, k = 5)
+)
+
+# Train multiple base learners
+base_models <- caretList(
+  NObeyesdad ~ ., 
+  data = df_log_train,
+  trControl = train_control,
+  methodList = c("multinom", "rpart", "nnet"),
+  tuneLength = 3
+)
+
+
+# Create the stacked ensemble using glm as meta-learner
+stacked_models <- caretStack(
+  base_models,
+  method = "multinom",
+  metric = "Accuracy",
+  trControl = train_control)
+
+# Extract cross-validated accuracy from the ensemble's meta-model
+max_cv_accuracy_stacking <- max(stacked_models$ens_model$results$Accuracy)
+
+
+# Print performance
+print(stacked_models)
+
+```
+
+Is important to take into consideration that we have use the function caretStack() to successfully train a multiclass variable, nevertheless its prediction method, which is (predict.caretStack) may not work as expected. This is why, to make reliable predictions, we should pass manually the base learner outputs on the test to the meta-learner.
+
+In order to combine these models we used a meta-learner based on penalized multinomial logistic regression (`multinom`), which is suitable for multiclass classification tasks, as our target variable has 7 different classes. Then, we trained our sample by using 5-fold cross-validation, and the final model achieved:
+
+-   A high cross-validated accuracy of `r round(max(stacked_models$ens_model$results$Accuracy), 4)`
+
+This indicates that our meta-learner offered a reliable predictive performance across the seven obesity classification categories. It also learned how to effectively weight the predictions from each base learner, which resulted in a improved overall performance compared to the individual models. This help us ensure that stacking enhanced the model accuracy and robustness.
+
+# Evaluation
+
+## New prediction with ensemble
+
+In this part of the project I have created a new data, to simulate unseen data for the model, so that I can properly evaluate how well our **trained stacked heterogenous ensemble model** can generalize. 
+
+This new data example is going to undergo the same preprocessing steps that have been used during the training step, which in this case includes: encoding the binary columns, one hot-encoding and z-score normalization,  to ensure consistency and to be able to return a prediction that is interpreted by the stacked heterogenous ensemble model, which was trained with the log_reg_train data. 
+
+Then, we will use the **stacked heterogenous ensemble model**, which combines predictions from: logistic regression, decision tree, and neural network base learners using a meta-learner. Finally, the final prediction is obtained by determining the class that has the highest probability.
+
+```{r new_ensemble_predictions, echo=TRUE, warning=FALSE}
+
+new_data <- data.frame(
+  Gender = "Male",
+  Age = 25,
+  Height = 1.75,
+  Weight = 75,
+  family_history_with_overweight = "yes",
+  FAVC = "yes",
+  FCVC = 3,
+  NCP = 3,
+  CAEC = "Sometimes",
+  SMOKE = "no",
+  CH2O = 2,
+  SCC = "no",
+  FAF = 1,
+  TUE = 1,
+  CALC = "Sometimes",
+  MTRANS = "Public_Transportation",
+  BMI = 25
+)
+
+# Determine binary columns 
+binary_columns_example <- c("FAVC", "SMOKE", "SCC", "family_history_with_overweight")
+
+# Transform binary columns i
+for (col in binary_columns_example) {
+  new_data[[col]] <- ifelse(new_data[[col]] == "yes", 1, 0)
+}
+
+# Apply one-hot encoding to the categorical variables using our function
+new_data_encoded <- one_hot_encode(new_data, target_column = "NObeyesdad")
+
+# Reorder and add missing columns to match the training data that we have used in the ensemble
+missing_cols <- setdiff(names(df_log_reg), names(new_data_encoded))
+for (col in missing_cols) {
+  new_data_encoded[[col]] <- 0
+}
+new_data <- new_data_encoded[, names(df_log_reg)]
+
+# Determine the columns that we have to normalize, and the mean and sd of the training data that we have used to train our heterogenous ensemble
+columns_to_normalize_new_data <- names(df_log_reg)[sapply(df_log_reg, is.numeric)]
+mean_train_new_data <- sapply(df_log_reg[, columns_to_normalize_new_data], mean)
+sd_train_new_data <- sapply(df_log_reg[, columns_to_normalize_new_data], sd)
+
+# Now we perform normalization using the data from the training set
+for (col in columns_to_normalize_new_data) {
+  if (col %in% names(new_data)) {
+    new_data[[col]] <- (new_data[[col]] - mean_train_new_data[col]) / sd_train_new_data[col]
+  }
+}
+
+# Determine the probabilities
+new_data_probabilities <- predict(stacked_models, newdata = new_data)
+
+# Get class with the highest probability
+new_data_predicted_class <- colnames(new_data_probabilities)[which.max(new_data_probabilities)]
+
+# Print the final result
+cat("The predicted obesity category for the new data is:", new_data_predicted_class, "\n")
+
+```
+
+As we can observe in the results, the stacked heterogeneous ensemble  predicted successfully the obesity category for the new individual based on its features, being in this case **Obesity_Type_II**. 
+
+This example demonstrates the ability that the model has to generalize to new and unseen data, and to be able to predict a specific class.
+
+## Comparison of Model Performances
+
+### Multinomial Logistic Regression Model Comparison
+
+```{r multi_log_reg_models_comparison, echo = TRUE, warning=FALSE}
+
+multinomial_logistic_models_results <- data.frame(
+  Model = c(
+    "Multinomial Logistic Regression",
+    "LASSO-Tuned Logistic Regression",
+    "Logistic Regression Ensemble",
+    "Logistic Regression Ensemble - 10-Fold Cross-Validation"
+  ),
+  Accuracy = c(
+    round(log_reg_accuracy, 4),
+    round(log_reg_hypertuned_model_accuracy, 4),
+    round(log_hom_ensemble_accuracy, 4),
+    round(log_reg_average_accuracy_k, 4)
+
+  ),
+  Macro_F1 = c(
+    round(log_reg_macro_f1, 4),
+    round(log_reg_hypertuned_model_macro_f1, 4),
+    round(log_hom_ensemble_f1_score, 4),
+    round(log_reg_average_macro_f1_k, 4)
+
+  )
+)
+
+library(knitr)
+knitr::kable(multinomial_logistic_models_results, caption = "Multinomial Logistic Regression Models Comparison")
+
+```
+
+Here it can be observed the different accuracy and Macro-F1 values that we have achieved for the different multinomial logistic regression models. What we can state base on this is that:
+
+-   The Initial Multinomial Logistic Regression Model initially performed very well, as it achieved great Macro F1-score and accuracy values, demonstrating that all of the variables had a strong predictive power.
+
+-   The Lasso-Hypertuned Logistic Regression improved the accuracy and F1-scores significantly, and it improved the model as it selected only the more relevant features, which made the model simpler and more generaliable, even with a better performance.
+
+-   The Logistic Regression Homogenous Ensemble demontrated a slightly better performance than the initial model, as it averaged out the individual model errors, reducing the variance. Nevertheless it didn´t outperform the Hypertuned Logistic Regression Model.
+
+-   The Logistic Regression Homogeneous Ensemble with the 10-fold cross validation demonstrated the better performance, demonstrating how the combination of the homogenous ensemble together with the fact that cross-validation ensures that the model performs well across the different data predictions. It leads this model to become the more stable and robust classifier.
+
+What I can conclude after this analysis is that **The logistic regression homogeneous ensemble with 10-fold cross validation** achieves the highest accuracy and macro F1-score, demonstrating that this final model isn´t only accurate but is also efficient at generalization with unseen data. This makes the algorithm highly suitable to its application in public health.
+
+### Decision Trees Model Comparison
+
+```{r dec_tree_models_comparison, echo = TRUE, warning=FALSE}
+
+decision_tree_models_results <- data.frame(
+  Model = c(
+    "Basic Decision Tree",
+    "Pruned Decision Tree",
+    "C5.0 Boosted Decision Tree",
+    "Bagged Decision Tree Ensemble",
+    "Bagged Decision Tree - 10-Fold Cross-Validation"
+  ),
+  Accuracy = c(
+    round(dec_tree_accuracy, 4),
+    round(pruned_dec_tree_accuracy, 4),
+    round(C5_boosted_model_accuracy, 4),
+    round(dec_tree_hom_ensemble_accuracy, 4),
+    round(dec_tree_average_accuracy_k, 4)
+  ),
+  Macro_F1 = c(
+    round(dec_tree_macro_f1, 4),
+    round(pruned_dec_tree_macro_f1, 4),
+    round(C5_dec_tree_macro_f1, 4),
+    round(dec_tree_hom_ensemble_macro_f1, 4),
+    round(dec_tree_average_macro_f1_k, 4)
+  )
+)
+
+library(knitr)
+knitr::kable(decision_tree_models_results, caption = "Decision Tree Models Comparison")
+```
+
+Here we can observe the differnt accuracy and Macro-F1 value that we have achieved for the different decision tree models. What we can state base on this is that:
+
+-   The Initial Decision Tree Model initially performed very well, as it achieved great Macro F1-score and accuracy values, demonstrating that all of the variables had a strong predictive power.
+
+-   The Pruned Decision Tree Model obtained identical accuracy and F1 values as the Initial Decision Tree Model, demonstrated that the original tree was already well-optimized so,this pruning step has been used as a validation step to probe it.
+
+-   The C.5 Boosted Model achieved the higher accuracy and F1-score, demonstrating the power of boosting in order to improve the performance of the decision tree, by correcting the errors that are made by the previous models.
+
+-   The Decision Tree Homogeneous Ensemble, has a great performance, slightly better than the initial model, but it is also slightly smaller than the C5.0 Boosted Decision tree. Nevertheless, this demonstrates that the bagging process efficiently reduced the variance that was associated with the individual trees and it improves the model´s prediction. This reinforces the importance of ensemble method for generalization.
+
+-   The Decision Tree Homogeneous Ensemble with the 10-fold cross validation demonstrated similar performance than the initial and pruned models, and a slighly smaller performance than the Homogeneous Ensemble. This could be caused as a result of variability in the smaller training folds that are generated during the model, showing a small sensitivity to data splits.
+
+What I can conclude after this analysis is that **The C.5 Boosted Decision Tree** achieves the highest accuracy and macro F1-score, demonstrating that boosting improves our model. Nevertheless is important to take into consideration that bagging also improved robustness, while pruning showed no improvements, suggesting that the initial tree had an optimal size.
+
+### Neural Networks Model Comparison
+
+```{r nn_models_comparison, echo = TRUE, warning=FALSE}
+
+neural_network_models_results <- data.frame(
+  Model = c(
+    "Basic Neural Network",
+    "Tuned Neural Network",
+    "Bagged Neural Network Ensemble",
+    "Bagged Neural Network - 10-Fold Cross-Validation"
+  ),
+  Accuracy = c(
+    round(nn_model_accuracy, 4),
+    round(nn_tuned_model_accuracy, 4),
+    round(nn_hom_ensemble_accuracy, 4),
+    round(nn_average_accuracy_k, 4)
+  ),
+  Macro_F1 = c(
+    round(nn_macro_f1, 4),
+    round(nn_tuned_macro_f1, 4),
+    round(nn_hom_ensemble_macro_av_f1, 4),
+    round(nn_average_macro_f1_k, 4)
+  )
+)
+
+library(knitr)
+knitr::kable(neural_network_models_results, caption = "Neural Network Models Comparison")
+```
+
+Here we can observe the differnt accuracy and Macro-F1 value that we have achieved for the different decision tree models. What we can state base on this is that:
+
+-   The Initial Neural Network Model initially performed very well, as it achieved great Macro F1-score and accuracy values, demonstrating that all of the variables had a strong predictive power.
+
+-   The Tuned Nueral Network Model improved the accuracy and F1-scores significantly, demonstrating that the hyperparameter optimization that has been performed ( size = 10, decay = 5e-4,maxit = 200) has a substantial impact on the effectivenes of the model.
+
+-   The Homogenous Neural Network Ensemble Model demonstrates the higher performance overall, as the accuracy and F1-valuer are the higher ones. This showcases how bagging reduced the variance of the model and improved the generalization.
+
+-   The Homogenous Neural Network Ensemble Model with the 10-fold cross validation demonstrated a slightly better performance than the initial models. This could be caused as a result of variability in the smaller training folds that are generated during the model, showing a small sensitivity to data splits.
+
+### Ensembles Comparison
+
+```{r ensemble_models_comparison, echo = TRUE, warning=FALSE}
+
+ensemble_models_results <- data.frame(
+  Model = c(
+    "Logistic Regression Homogenous Ensemble",
+    "Decision Tree Homogenous Ensemble",
+    "Neural Networl Homogenous Ensemble",
+    "Heterogenous Ensemble"
+  ),
+  Accuracy = c(
+    round(log_hom_ensemble_accuracy, 4),
+    round(dec_tree_hom_ensemble_accuracy, 4),
+    round(nn_hom_ensemble_accuracy, 4),
+    round(heter_ensemble_accuracy, 4)
+  ),
+  Macro_F1 = c(
+    round(log_hom_ensemble_f1_score, 4),
+    round(dec_tree_hom_ensemble_macro_f1, 4),
+    round(nn_hom_ensemble_macro_av_f1, 4),
+    round(heter_ensemble_macro_f1, 4)
+  )
+)
+
+library(knitr)
+knitr::kable(ensemble_models_results, caption = "Ensemble Models Comparison")
+```
+The comparison between the different ensemble models demonstrate that the **Decision Tree Homogenous Ensemble outperform the rest of the models** as it achieves the higher accuracy and F1 score values, which indicates that it has a trong overall performance and a balanced classification across the different classes. Nevertheless, the Neural Network Homogenous Ensemble follows it, with a slighlty smaller but also great performance and f1-score.  Regarding the Logistic Regresion Homogenous Ensemble, it performs respectably but, it is important to consider that, when I analyzed the **The logistic regression homogeneous ensemble with 10-fold cross validation**, it actually achieves the highest accuracy and macro F1-score, with an accuracy value of `r round(log_reg_average_accuracy_k, 4)` and a F1-score of `r round(log_reg_average_macro_f1_k, 4)` demonstrating that is the homogenous ensemble that better perfoms under cross-validated conditions. 
+
+Is important to remark that the Heterogenous Ensemble has a significant underperfom, with an accuracy and Macro F1 score of approximately 87%. This could suggest that for this dataset, combining different model types did not improved the results, which could be caused as a results of conflicting model biased.  
+
+As a result of the lower performance that has been observed in the heterogenous ensemble, I have implemented a stacking ensemble approach to improve its predictive performance, and after training it, the stacked ensemble achieved a high cross-validated accuracy of `r round(max(stacked_models$ens_model$results$Accuracy), 4)`.
+
+This demonstrated that it achieved an improved performance over the original heterogeneous ensemble,  suggesting that the meta-learner was able to learn in an effective way how to weight and integrate the diverse base learners, resulting in a more accurate and robust classification model.
+
+### Comparison with the article
+
+To compare our approach with prior work, I are going to use the work of Kabongo and Luzolo (@kabongo2020five). As mentioned previously, they evaluated five traditional machine learning classifiers that include Random Forest, Support Vector Machine (SVM), Logistic Regression, K-Nearest Neighbor and Ridge Classifier. In their model validation they indicated the accuracy that they achieved on each model was: 
+
+- 91% of accuracy for Random Forest Classifier
+- 83% of accuracy for K-Nearest Neighbor Classifier
+- 83% of accuracy for Support Vector Machine
+- 80% of accuracy for Logistic Regression
+- 67% of accuracy for Ridge Classifier. 
+
+Then,  _"After having evaluated our optimized Support Vector classifier in Grid Search CV with the same metrics as given by the Classification Report, the Confusion Matrix, and the learning curve, our model accuracy improved from 80% to 97% with the following f1-score as seen in the classification report below: 96% for class one (obesity type I), 99% for class two (obesity type II), 99% for class three (obesity type III), 95% for class four (overweight level I), 91% for class five (overweigh level II), 97% for class six (normal weight), and 99% for class seven (insufficient weight)"_ as mentioned in (@kabongo2020five).
+
+In contrast to this, our project not only evaluate traditional machine learnins but it also performed a more advanced and comprehensive modeling approach by using **ensemble learning techniques** that include bagging, boosting and stacking, as well as hyperparameter tuning and 10-fold cross-validation. In addition to this, I also evaluated the models using the macro F1-score, as it provides a more balance analyse of the model performance across the different classes of our multinomial variable, including the minority classes.
+
+All of our models, except for the heterogenous ensemble, demonstrated a higher accuracy than the models performed by (@kabongo2020five), specifically, if I focus on the **The Logistic Regression Homogeneous Ensemble** it demonstrated a much higher accuracy value `r round(log_hom_ensemble_accuracy, 4)`. Then if I focus on our **Decision Tree Homogenous Ensemble** it has achieved an accuracy of `r round(dec_tree_hom_ensemble_accuracy, 4)`, and the f1-scores for the model are: 96% for class one (obesity type I), 97% for class two (obesity type II), 98% for class three (obesity type III), 96% for class four (overweight level I), 97% for class five (overweight level II), 97% for class six (normal weight), and 98% for class seven (insufficient weight), achieven better F1-score across the different categories. 
+
+These results demonstrate that, when we combine proper performance metrics with an ensemble learning method, we can significantly improve both, the accuracy and the robustness of this obesity classification model. This approach is more advanced technically and also more efficient and robust to use it in health care applications. 
+
+# Deployment
+
+As mentioned in (@artificium_crispdm), _"The deployment stage involves taking the evaluation results and determining a strategy for deploying the models, Overall, a well-developed deployment plan is essential for maximizing the value of the data mining project and achieving the desired business outcomes."_
+
+## Deployment plan
+
+In order to deploy our best-performing model, the deployment plan would involve including it into a public health service or a clinical decision-support tool that can be used by clinicians or patients to be able to differentiate between the obesity levels.
+
+So, to make the model available for all, including healthcare professionals and independent-individuals, it can be created a web application where the data related to BMI, eating habits and physical activity is included and it will generate a predicted obesity category. The model could additionally include recommendation of what type of lyfestyle changes could be benefitial acording to the predicted category.
+
+The different elements that we should take into consideration are:
+
+-   **Required Resources** : The hosting web server, creating the web interface, provide a good maintenance of the web
+-   **Key Stakeholders**: The developers, the healtcare profesionals, the healthcare agencies that offer this tool for individual patients
+
+##Monitoring and Maintenance Plan
+
+It is important to establish a monitoring process to ensure that the accuracy and relevance of the model can be maintained for a long term. This is why the key performance indicators (KPIs) that will be used to evaluate the effectiveness of the data, should be checked regularly with differnt kinds of data.
+
+The model should be trained again periodically with new data, because as the different parameters to determine the obesity type levels can change, and so can the population lifestyle and differences in the characteristics of the population.
+
+In addition to this, is essential to create and maintain documentation where the different model updates and performance is tracked over time, which demonstrates transparency.
+
+# Conclusion
+
+This project has successfully demonstrated that ensemble learning techniques can outperform traditional techniques in in tackling a multiclass classification problem, specifically in the determination of the obestity category of this dataset. 
+
+The results have shown that,  the **Logistic Regression Homogeneous Ensemble with 10-fold cross-validation** and the **C5.0 Boosted Decision Tree** stand out as the better performers, achieving high accuracy and macro F1-scores, which is an indicator of a strong ability to generalizate and to also perform a balanced classification between all obesity categories.
+
+Compared to previous work, such as Kabongo & Luzolo (2020), our project not only improved the accuracy values, specifically in the logisti regression model, but it also provided a more robust evaluation as it also determines the macro F1-scores, which is especially important in public health where the analysis and performance of the  minority class performance is critical.
+
+In conclusion, this project demonstrates how model selection and evaluation are essential, and have a greeat impact in our predictive model, as they can convert it into a valuable tool that can be used to improve the health system. 
+
+# References
